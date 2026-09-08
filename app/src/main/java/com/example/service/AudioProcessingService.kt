@@ -92,8 +92,12 @@ class AudioProcessingService : Service() {
    * @param elevation Vertical angle in degrees (-90 to +90)
    */
   fun setVirtualSourcePosition(azimuth: Float, elevation: Float) {
-    _azimuthDegrees.value = azimuth.coerceIn(-90f, 90f)
-    _elevationDegrees.value = elevation.coerceIn(-90f, 90f)
+    val az = azimuth.coerceIn(-90f, 90f)
+    val el = elevation.coerceIn(-90f, 90f)
+    _azimuthDegrees.value = az
+    _elevationDegrees.value = el
+    sharedAzimuth.value = az
+    sharedElevation.value = el
   }
 
   /**
@@ -166,6 +170,7 @@ class AudioProcessingService : Service() {
         val rms = sqrt(sumSquares / readCount)
         val normalizedLevel = (rms / 32768.0).toFloat().coerceIn(0f, 1f)
         _audioLevel.value = normalizedLevel
+        sharedAudioLevel.value = normalizedLevel
 
         // Apply binaural spatialization effects using simple HRTF filter approximation
         val spatializedStereoPcm = applyBinauralSpatializationHrtf(
@@ -292,6 +297,10 @@ class AudioProcessingService : Service() {
     private const val TAG = "AudioProcessingService"
     const val ACTION_START_CAPTURE = "com.example.service.action.START_CAPTURE"
     const val ACTION_STOP_CAPTURE = "com.example.service.action.STOP_CAPTURE"
+
+    val sharedAudioLevel = MutableStateFlow(0f)
+    val sharedAzimuth = MutableStateFlow(0f)
+    val sharedElevation = MutableStateFlow(0f)
 
     /**
      * Convenience helper to launch audio processing capture service.

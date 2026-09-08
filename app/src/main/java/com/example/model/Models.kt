@@ -65,3 +65,45 @@ data class PrivacySection(
   val content: String,
   val subItems: List<String> = emptyList()
 )
+
+data class UserProfile(
+  val id: String = "",
+  val name: String = "",
+  val email: String = "",
+  val phone: String = "",
+  val status: String = "3D Live Enabled",
+  val avatarUrl: String? = null,
+  val isSpatialReady: Boolean = true,
+  val isOnline: Boolean = true
+)
+
+enum class CallSessionState {
+  INITIATING,
+  RINGING,
+  CONNECTED,
+  ENDED,
+  REJECTED
+}
+
+enum class VolumetricMeshMode(val label: String) {
+  HOLOGRAPHIC_MESH("Hologram Mesh"),
+  POINT_CLOUD("Point Cloud"),
+  DEPTH_CONTOURS("Depth Contours"),
+  PARALLAX_VIDEO("Parallax Video")
+}
+
+data class CallSession(
+  val callId: String = "",
+  val callerId: String = "",
+  val callerName: String = "",
+  val receiverId: String = "",
+  val receiverName: String = "",
+  val state: CallSessionState = CallSessionState.RINGING,
+  val is3D: Boolean = true,
+  val azimuth: Float = 0f,
+  val elevation: Float = 0f,
+  val depthIntensity: Float = 1.0f,
+  val meshMode: VolumetricMeshMode = VolumetricMeshMode.HOLOGRAPHIC_MESH,
+  val startedAt: Long = System.currentTimeMillis()
+)
+
