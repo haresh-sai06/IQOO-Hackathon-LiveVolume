@@ -53,6 +53,7 @@ data class CallUiState(
   val isFrontCamera: Boolean = true,
   val isSpeakerOn: Boolean = true,
   val is3DMode: Boolean = false,
+  val remotePointCloud: com.example.ml.PointCloud? = null,
   val elapsedSeconds: Long = 0L,
   val cameraPermissionGranted: Boolean = false,
   val audioPermissionGranted: Boolean = false,
@@ -115,6 +116,24 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(audioLevel = level) }
       }
     }
+
+    viewModelScope.launch {
+      agoraManager.remotePointCloud.collect { pc ->
+        _uiState.update { it.copy(remotePointCloud = pc) }
+      }
+    }
+  }
+
+  fun sendLocalPointCloud(pc: com.example.ml.PointCloud) {
+    agoraManager.sendPointCloud(pc)
+  }
+
+  fun toggle3DMode() {
+    _uiState.update { it.copy(is3DMode = !it.is3DMode) }
+  }
+
+  fun set3DMode(enabled: Boolean) {
+    _uiState.update { it.copy(is3DMode = enabled) }
   }
 
   fun initializeCall(callerName: String, customChannel: String? = null) {

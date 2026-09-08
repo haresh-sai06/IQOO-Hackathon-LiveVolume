@@ -303,6 +303,17 @@ class DepthEstimator(private val context: Context) {
   }
 
   /**
+   * Executes depth estimation and silhouette segmentation directly on a Bitmap.
+   */
+  fun estimateDepth(bitmap: Bitmap): DepthResult? {
+    if (depthInterpreter == null) return null
+    val scaled = Bitmap.createScaledBitmap(bitmap, 256, 256, true)
+    val result = estimateDepthAndSegmentInternal(scaled, SystemClock.elapsedRealtime())
+    result?.let { _latestDepth.value = it }
+    return result
+  }
+
+  /**
    * Executes combined depth estimation and person silhouette segmentation.
    */
   private fun estimateDepthAndSegmentInternal(scaled: Bitmap, pipelineStartTime: Long): DepthResult? {

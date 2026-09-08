@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,6 +85,42 @@ fun CallScreen(
   val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
   val activeSession by signalingRepo.activeSession.collectAsStateWithLifecycle()
 
+  var localSurfaceView by remember { androidx.compose.runtime.mutableStateOf<SurfaceView?>(null) }
+  val depthEstimator = remember { com.example.ml.DepthEstimator(context) }
+
+  androidx.compose.runtime.DisposableEffect(Unit) {
+    onDispose {
+      depthEstimator.close()
+    }
+  }
+
+  // Local depth capture and 3D Point Cloud streaming to remote peer (Phase 6)
+  LaunchedEffect(localSurfaceView, uiState.isCameraOn) {
+    val surface = localSurfaceView ?: return@LaunchedEffect
+    if (!uiState.isCameraOn) return@LaunchedEffect
+
+    val bmp = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    while (true) {
+      kotlinx.coroutines.delay(200) // 5 FPS capture & streaming
+      try {
+        if (surface.holder.surface.isValid) {
+          android.view.PixelCopy.request(surface, bmp, { copyResult ->
+            if (copyResult == android.view.PixelCopy.SUCCESS) {
+              val result = depthEstimator.estimateDepth(bmp)
+              result?.pointCloud?.let { pc ->
+                viewModel.sendLocalPointCloud(pc)
+              }
+            }
+          }, handler)
+        }
+      } catch (e: Exception) {
+        // safety
+      }
+    }
+  }
+
   LaunchedEffect(callerName, channelName) {
     viewModel.initializeCall(callerName, channelName)
   }
@@ -120,9 +157,38 @@ fun CallScreen(
       .background(Color(0xFF0F172A))
       .testTag("call_screen")
   ) {
-    // 1. Full-bleed Video Stream Surface (Remote Agora Peer or Waiting State)
+    // 1. Full-bleed Video Stream Surface (3D Hologram, 2D Agora Peer, or Waiting State)
     Box(modifier = Modifier.fillMaxSize()) {
-      if (uiState.remoteUid != null && !uiState.isRemoteVideoMuted) {
+      if (uiState.is3DMode) {
+        // 3D Volumetric Mode: Live rotatable point cloud reconstruction of the remote caller!
+        Box(modifier = Modifier.fillMaxSize()) {
+          com.example.ui.components.VolumetricVisualizer(
+            pointCloud = uiState.remotePointCloud,
+            modifier = Modifier.fillMaxSize()
+          )
+
+          // 3D Volumetric Status Badge
+          Box(
+            modifier = Modifier
+              .align(Alignment.BottomCenter)
+              .padding(bottom = 120.dp)
+              .clip(RoundedCornerShape(99.dp))
+              .background(Color.Black.copy(alpha = 0.75f))
+              .border(1.dp, LivePrimaryContainer.copy(alpha = 0.5f), RoundedCornerShape(99.dp))
+              .padding(horizontal = 16.dp, vertical = 6.dp)
+          ) {
+            Text(
+              text = if (uiState.remotePointCloud != null)
+                "Live 3D Volumetric Stream • Drag to orbit"
+              else
+                "Waiting for $callerName's 3D volumetric stream...",
+              color = Color.White.copy(alpha = 0.9f),
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Medium
+            )
+          }
+        }
+      } else if (uiState.remoteUid != null && !uiState.isRemoteVideoMuted) {
         // Live remote video stream rendered directly from Agora RTC
         AndroidView(
           factory = { ctx ->
@@ -305,6 +371,7 @@ fun CallScreen(
               SurfaceView(ctx).apply {
                 setZOrderMediaOverlay(true)
                 viewModel.agoraManager.setupLocalVideo(this)
+                localSurfaceView = this
               }
             },
             modifier = Modifier.fillMaxSize()
@@ -342,6 +409,52 @@ fun CallScreen(
             modifier = Modifier.size(13.dp)
           )
         }
+      }
+    }
+
+    // 2D Video vs 3D Hologram Volumetric Toggle (Phase 6)
+    Row(
+      modifier = Modifier
+        .align(Alignment.TopCenter)
+        .statusBarsPadding()
+        .padding(top = 74.dp)
+        .shadow(8.dp, RoundedCornerShape(99.dp))
+        .clip(RoundedCornerShape(99.dp))
+        .background(Color.Black.copy(alpha = 0.7f))
+        .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(99.dp))
+        .padding(3.dp),
+      horizontalArrangement = Arrangement.Center
+    ) {
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(99.dp))
+          .background(if (!uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
+          .clickable { viewModel.set3DMode(false) }
+          .padding(horizontal = 14.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+      ) {
+        Text(
+          text = "2D Video",
+          color = if (!uiState.is3DMode) Color.White else Color.White.copy(alpha = 0.65f),
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold
+        )
+      }
+
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(99.dp))
+          .background(if (uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
+          .clickable { viewModel.set3DMode(true) }
+          .padding(horizontal = 14.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+      ) {
+        Text(
+          text = "3D Hologram",
+          color = if (uiState.is3DMode) Color.White else Color.White.copy(alpha = 0.65f),
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold
+        )
       }
     }
 
