@@ -46,6 +46,11 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.ui.theme.LivePrimaryContainer
 import com.example.ui.theme.LiveSuccess
+import com.example.ui.theme.ThemeManager
+import com.example.util.HapticType
+import com.example.util.HapticsManager
+import androidx.compose.ui.platform.LocalContext
+
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -255,6 +260,8 @@ fun LiveVolumeBottomBar(
   onTabSelected: (NavigationTab) -> Unit,
   modifier: Modifier = Modifier
 ) {
+  val context = LocalContext.current
+  val activePrimary = ThemeManager.currentTheme.primaryContainer
   NavigationBar(
     modifier = modifier.testTag("main_bottom_nav_bar"),
     containerColor = Color.White.copy(alpha = 0.96f),
@@ -264,7 +271,10 @@ fun LiveVolumeBottomBar(
       val isSelected = tab == currentTab
       NavigationBarItem(
         selected = isSelected,
-        onClick = { onTabSelected(tab) },
+        onClick = {
+          HapticsManager.trigger(context, HapticType.TAB_CHANGE)
+          onTabSelected(tab)
+        },
         icon = {
           when (tab) {
             NavigationTab.RECENTS -> Icon(
@@ -294,9 +304,9 @@ fun LiveVolumeBottomBar(
           )
         },
         colors = NavigationBarItemDefaults.colors(
-          selectedIconColor = LivePrimaryContainer,
-          selectedTextColor = LivePrimaryContainer,
-          indicatorColor = LivePrimaryContainer.copy(alpha = 0.12f),
+          selectedIconColor = activePrimary,
+          selectedTextColor = activePrimary,
+          indicatorColor = activePrimary.copy(alpha = 0.12f),
           unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
           unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
         )

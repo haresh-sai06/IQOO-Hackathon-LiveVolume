@@ -326,7 +326,8 @@ class CallViewModel : ViewModel() {
             timestampFormatted = "Just now",
             period = "TODAY",
             isOnline = true,
-            isSpatial = isSpatial
+            isSpatial = isSpatial,
+            latencyMs = _uiState.value.latencyMs
           )
         )
       }

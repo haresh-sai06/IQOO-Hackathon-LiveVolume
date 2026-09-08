@@ -1,8 +1,11 @@
 package com.example.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,7 +27,9 @@ import com.example.ui.screens.ContactsScreen
 import com.example.ui.screens.GuidesScreen
 import com.example.ui.screens.HelpSupportScreen
 import com.example.ui.screens.HistoryScreen
+import com.example.ui.screens.NotificationsScreen
 import com.example.ui.screens.PrivacyScreen
+import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.RecentsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.WelcomeScreen
@@ -46,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.repository.CallSignalingRepository
+import com.example.data.repository.AuthRepository
 import com.example.ui.theme.LiveError
 import com.example.ui.theme.LivePrimaryContainer
 
@@ -53,6 +59,7 @@ sealed class Screen(val route: String) {
   data object Welcome : Screen("welcome")
   data object Auth : Screen("auth")
   data object Main : Screen("main")
+  data object Profile : Screen("profile")
   data object Call : Screen("call/{callerName}") {
     fun createRoute(callerName: String) = "call/${java.net.URLEncoder.encode(callerName, "UTF-8")}"
   }
@@ -60,6 +67,7 @@ sealed class Screen(val route: String) {
   data object Help : Screen("help")
   data object About : Screen("about")
   data object Privacy : Screen("privacy")
+  data object Notifications : Screen("notifications")
 }
 
 @Composable
@@ -68,11 +76,19 @@ fun LiveVolumeApp() {
   val context = LocalContext.current
   val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
   val incomingCall by signalingRepo.incomingCall.collectAsStateWithLifecycle()
+  val authRepository = remember { AuthRepository.getInstance(context) }
+  val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
+  val startDestination = if (currentUser != null) Screen.Main.route else Screen.Auth.route
 
-  Box(modifier = Modifier.fillMaxSize()) {
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(MaterialTheme.colorScheme.surface)
+      .statusBarsPadding()
+  ) {
     NavHost(
       navController = navController,
-      startDestination = Screen.Welcome.route
+      startDestination = startDestination
     ) {
     composable(Screen.Welcome.route) {
       WelcomeScreen(
@@ -98,7 +114,7 @@ fun LiveVolumeApp() {
         },
         onAuthSuccess = {
           navController.navigate(Screen.Main.route) {
-            popUpTo(Screen.Welcome.route) { inclusive = true }
+            popUpTo(Screen.Auth.route) { inclusive = true }
           }
         },
         onTermsClick = {
@@ -112,6 +128,9 @@ fun LiveVolumeApp() {
         onStartCall = { callerName ->
           navController.navigate(Screen.Call.createRoute(callerName))
         },
+        onOpenProfile = {
+          navController.navigate(Screen.Profile.route)
+        },
         onNavigateToGuides = {
           navController.navigate(Screen.Guides.route)
         },
@@ -124,8 +143,24 @@ fun LiveVolumeApp() {
         onNavigateToPrivacy = {
           navController.navigate(Screen.Privacy.route)
         },
+        onNavigateToNotifications = {
+          navController.navigate(Screen.Notifications.route)
+        },
         onLogOut = {
-          navController.navigate(Screen.Welcome.route) {
+          authRepository.signOut()
+          navController.navigate(Screen.Auth.route) {
+            popUpTo(0) { inclusive = true }
+          }
+        }
+      )
+    }
+
+    composable(Screen.Profile.route) {
+      ProfileScreen(
+        onBack = { navController.popBackStack() },
+        onLogOut = {
+          authRepository.signOut()
+          navController.navigate(Screen.Auth.route) {
             popUpTo(0) { inclusive = true }
           }
         }
@@ -196,6 +231,14 @@ fun LiveVolumeApp() {
         }
       )
     }
+
+    composable(Screen.Notifications.route) {
+      NotificationsScreen(
+        onBack = {
+          navController.popBackStack()
+        }
+      )
+    }
   }
 
   // Incoming Real-time 3D Call Notification Dialog
@@ -236,10 +279,12 @@ fun LiveVolumeApp() {
 @Composable
 fun MainShellScreen(
   onStartCall: (callerName: String) -> Unit,
+  onOpenProfile: () -> Unit,
   onNavigateToGuides: () -> Unit,
   onNavigateToHelp: () -> Unit,
   onNavigateToAbout: () -> Unit,
   onNavigateToPrivacy: () -> Unit,
+  onNavigateToNotifications: () -> Unit,
   onLogOut: () -> Unit
 ) {
   var currentTab by remember { mutableStateOf(NavigationTab.RECENTS) }
@@ -262,16 +307,19 @@ fun MainShellScreen(
           onStartCall = onStartCall
         )
         NavigationTab.CONTACTS -> ContactsScreen(
-          onStartCall = onStartCall
+          onStartCall = onStartCall,
+          onOpenProfile = onOpenProfile
         )
         NavigationTab.HISTORY -> HistoryScreen(
           onStartCall = onStartCall
         )
         NavigationTab.SETTINGS -> SettingsScreen(
+          onNavigateToProfile = onOpenProfile,
           onNavigateToGuides = onNavigateToGuides,
           onNavigateToHelp = onNavigateToHelp,
           onNavigateToAbout = onNavigateToAbout,
           onNavigateToPrivacy = onNavigateToPrivacy,
+          onNavigateToNotifications = onNavigateToNotifications,
           onLogOut = onLogOut
         )
       }

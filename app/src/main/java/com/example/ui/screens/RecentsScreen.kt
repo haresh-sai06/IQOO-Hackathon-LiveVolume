@@ -117,7 +117,7 @@ fun RecentsScreen(
         )
       }
     } else {
-      DataRepository.callRecords
+      emptyList()
     }
   }
 

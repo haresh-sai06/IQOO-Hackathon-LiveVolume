@@ -23,5 +23,6 @@ data class CallHistoryEntity(
   val timestampFormatted: String = "Just now",
   val period: String = "TODAY",            // "TODAY", "YESTERDAY", "EARLIER_THIS_WEEK"
   val isOnline: Boolean = false,
-  val isSpatial: Boolean = true
+  val isSpatial: Boolean = true,
+  val latencyMs: Int = 24
 )

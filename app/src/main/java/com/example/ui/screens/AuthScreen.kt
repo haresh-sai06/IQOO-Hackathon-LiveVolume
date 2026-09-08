@@ -81,8 +81,8 @@ fun AuthScreen(
 
   var isRegisterMode by remember { mutableStateOf(false) }
   var fullName by remember { mutableStateOf("") }
-  var emailOrPhone by remember { mutableStateOf("alex@example.com") }
-  var password by remember { mutableStateOf("Password123!") }
+  var emailOrPhone by remember { mutableStateOf("") }
+  var password by remember { mutableStateOf("") }
   var isPasswordVisible by remember { mutableStateOf(false) }
   var rememberMe by remember { mutableStateOf(true) }
   var agreeTerms by remember { mutableStateOf(true) }
@@ -90,21 +90,38 @@ fun AuthScreen(
   var errorMessage by remember { mutableStateOf<String?>(null) }
 
   val handleAuth: () -> Unit = {
-    scope.launch {
-      isLoading = true
-      errorMessage = null
-      val result = if (isRegisterMode) {
-        authRepository.register(fullName.ifBlank { "Alex Rivera" }, emailOrPhone, password)
-      } else {
-        authRepository.signIn(emailOrPhone, password)
-      }
-      isLoading = false
-      result.onSuccess {
-        onAuthSuccess()
-      }.onFailure {
-        errorMessage = it.message ?: "Authentication failed"
+    val emailClean = emailOrPhone.trim()
+    val passwordClean = password.trim()
+    val nameClean = fullName.trim()
+
+    if (isRegisterMode && nameClean.isBlank()) {
+      errorMessage = "Please enter your full name."
+    } else if (emailClean.isBlank()) {
+      errorMessage = "Please enter your email or phone number."
+    } else if (!emailClean.contains("@") && emailClean.length < 7) {
+      errorMessage = "Please enter a valid email address or phone number."
+    } else if (passwordClean.isBlank()) {
+      errorMessage = "Please enter your password."
+    } else if (passwordClean.length < 6) {
+      errorMessage = "Password must be at least 6 characters."
+    } else {
+      scope.launch {
+        isLoading = true
+        errorMessage = null
+        val result = if (isRegisterMode) {
+          authRepository.register(nameClean, emailClean, passwordClean)
+        } else {
+          authRepository.signIn(emailClean, passwordClean)
+        }
+        isLoading = false
+        result.onSuccess {
+          onAuthSuccess()
+        }.onFailure {
+          errorMessage = it.message ?: "Authentication failed. Please check your credentials."
+        }
       }
     }
+    Unit
   }
 
   val scrollState = rememberScrollState()
@@ -492,7 +509,7 @@ fun AuthScreen(
 
     // Primary CTA Button
     Button(
-      onClick = handleAuth,
+      onClick = { handleAuth() },
       enabled = !isLoading,
       modifier = Modifier
         .fillMaxWidth()

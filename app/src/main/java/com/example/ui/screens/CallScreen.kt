@@ -76,6 +76,11 @@ import com.example.model.DataRepository
 import com.example.ui.components.CallControlsOverlay
 import com.example.ui.components.CameraPreview
 import com.example.ui.components.ConnectionStrengthIcon
+import com.example.ui.components.CallSignalLatencyMonitor
+import com.example.util.HapticType
+import com.example.util.HapticsManager
+import com.example.ui.theme.ThemeManager
+
 import com.example.ui.components.LiveVolumeAvatar
 import com.example.ui.theme.LivePrimaryContainer
 import com.example.ui.theme.LiveSuccess
@@ -300,12 +305,13 @@ fun CallScreen(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          // Connection strength icon observing ViewModel connectivity state and latency
-          ConnectionStrengthIcon(
+          // Interactive Call Signal & Latency Telemetry Monitor
+          CallSignalLatencyMonitor(
             latencyMs = uiState.latencyMs,
-            connectionStatus = uiState.connectionStatus,
             connectionQuality = uiState.connectionQuality,
-            onClick = { viewModel.cycleConnectionQuality() }
+            connectionStatus = uiState.connectionStatus,
+            binauralActive = true,
+            azimuthDegrees = uiState.azimuth
           )
 
           // 3D / 2D Indicator Pill
@@ -583,7 +589,10 @@ fun CallScreen(
                 .clip(RoundedCornerShape(99.dp))
                 .background(if (!uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
                 .clickable {
-                  if (uiState.is3DMode) viewModel.toggle3DMode()
+                  if (uiState.is3DMode) {
+                    HapticsManager.trigger(context, HapticType.MODE_SWITCH)
+                    viewModel.toggle3DMode()
+                  }
                 }
                 .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
@@ -600,7 +609,10 @@ fun CallScreen(
                 .clip(RoundedCornerShape(99.dp))
                 .background(if (uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
                 .clickable {
-                  if (!uiState.is3DMode) viewModel.toggle3DMode()
+                  if (!uiState.is3DMode) {
+                    HapticsManager.trigger(context, HapticType.MODE_SWITCH)
+                    viewModel.toggle3DMode()
+                  }
                 }
                 .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
@@ -631,7 +643,10 @@ fun CallScreen(
               .clip(RoundedCornerShape(99.dp))
               .background(if (uiState.showOpticsSheet) LivePrimaryContainer else Color.White.copy(alpha = 0.95f))
               .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(99.dp))
-              .clickable { viewModel.toggleOpticsSheet() }
+              .clickable {
+                HapticsManager.trigger(context, HapticType.OPTICS_TOGGLE)
+                viewModel.toggleOpticsSheet()
+              }
               .padding(horizontal = 14.dp, vertical = 8.dp)
           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -659,13 +674,23 @@ fun CallScreen(
       CallControlsOverlay(
         isMuted = uiState.isMuted,
         isCameraOn = uiState.isCameraOn,
-        onToggleMute = { viewModel.toggleMute() },
-        onSwitchCamera = { viewModel.switchCamera() },
+        onToggleMute = {
+          HapticsManager.trigger(context, HapticType.LIGHT)
+          viewModel.toggleMute()
+        },
+        onSwitchCamera = {
+          HapticsManager.trigger(context, HapticType.LIGHT)
+          viewModel.switchCamera()
+        },
         onEndCall = {
+          HapticsManager.trigger(context, HapticType.CALL_END)
           viewModel.endCall(callHistoryRepository)
           onEndCall()
         },
-        onToggleCamera = { viewModel.toggleCamera() }
+        onToggleCamera = {
+          HapticsManager.trigger(context, HapticType.LIGHT)
+          viewModel.toggleCamera()
+        }
       )
     }
   }

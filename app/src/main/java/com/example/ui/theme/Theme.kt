@@ -1,4 +1,4 @@
-package com.example.ui.theme
+﻿package com.example.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -7,11 +7,18 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme =
-  darkColorScheme(
-    primary = LivePrimaryContainer,
+@Composable
+fun MyApplicationTheme(
+  darkTheme: Boolean = false,
+  dynamicColor: Boolean = false,
+  content: @Composable () -> Unit,
+) {
+  val activeTheme = ThemeManager.currentTheme
+
+  val darkColorScheme = darkColorScheme(
+    primary = activeTheme.primaryContainer,
     onPrimary = LiveOnPrimary,
-    primaryContainer = LivePrimary,
+    primaryContainer = activeTheme.primary,
     onPrimaryContainer = LiveOnPrimaryContainer,
     secondary = LiveSecondaryContainer,
     onSecondary = LiveOnSecondary,
@@ -23,19 +30,18 @@ private val DarkColorScheme =
     onError = LiveOnError
   )
 
-private val LightColorScheme =
-  lightColorScheme(
-    primary = LivePrimaryContainer,
+  val lightColorScheme = lightColorScheme(
+    primary = activeTheme.primaryContainer,
     onPrimary = LiveOnPrimary,
-    primaryContainer = LivePrimaryContainer,
+    primaryContainer = activeTheme.primary,
     onPrimaryContainer = LiveOnPrimaryContainer,
-    secondary = LiveSecondary,
+    secondary = activeTheme.primary,
     onSecondary = LiveOnSecondary,
-    secondaryContainer = LiveSecondaryContainer,
-    onSecondaryContainer = LiveOnSecondaryContainer,
+    secondaryContainer = activeTheme.subtle,
+    onSecondaryContainer = activeTheme.primary,
     surface = LiveSurface,
     onSurface = LiveOnSurface,
-    surfaceVariant = LiveSurfaceContainerHighest,
+    surfaceVariant = activeTheme.border,
     onSurfaceVariant = LiveOnSurfaceVariant,
     outline = LiveOutline,
     outlineVariant = LiveOutlineVariant,
@@ -47,13 +53,7 @@ private val LightColorScheme =
     onBackground = LiveOnSurface
   )
 
-@Composable
-fun MyApplicationTheme(
-  darkTheme: Boolean = false,
-  dynamicColor: Boolean = false,
-  content: @Composable () -> Unit,
-) {
-  val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+  val colorScheme = if (darkTheme) darkColorScheme else lightColorScheme
 
   MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }

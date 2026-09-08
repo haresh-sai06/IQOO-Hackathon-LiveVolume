@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Videocam
@@ -63,14 +63,19 @@ import com.example.model.DataRepository
 import com.example.ui.components.LiveVolumeAvatar
 import com.example.ui.theme.LiveError
 import com.example.ui.theme.LivePrimaryContainer
+import com.example.util.HapticType
+import com.example.util.HapticsManager
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+  onNavigateToProfile: () -> Unit = {},
   onNavigateToGuides: () -> Unit = {},
   onNavigateToHelp: () -> Unit,
   onNavigateToAbout: () -> Unit,
   onNavigateToPrivacy: () -> Unit,
+  onNavigateToNotifications: () -> Unit = {},
   onLogOut: () -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -108,6 +113,7 @@ fun SettingsScreen(
         .clip(RoundedCornerShape(20.dp))
         .background(Color.White)
         .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(20.dp))
+        .clickable { onNavigateToProfile() }
         .padding(16.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween
@@ -116,12 +122,12 @@ fun SettingsScreen(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.weight(1f)
       ) {
-        val profileName = currentUser?.name ?: DataRepository.myProfile.name
-        val profileEmail = currentUser?.email?.ifBlank { "sarah.chen@example.com" } ?: "sarah.chen@example.com"
-        val profileInitials = (currentUser?.name?.take(2)?.uppercase()) ?: DataRepository.myProfile.initials
+        val profileName = currentUser?.name ?: "My Profile"
+        val profileEmail = currentUser?.email?.ifBlank { currentUser?.phone } ?: currentUser?.phone ?: "Tap to edit profile"
+        val profileInitials = (currentUser?.name?.take(2)?.uppercase()) ?: "ME"
 
         LiveVolumeAvatar(
-          avatarUrl = currentUser?.avatarUrl ?: DataRepository.myProfile.avatarUrl,
+          avatarUrl = currentUser?.avatarUrl,
           initials = profileInitials,
           size = 56.dp,
           showOnlineBadge = true,
@@ -258,7 +264,7 @@ fun SettingsScreen(
         icon = Icons.Default.Notifications,
         title = "Notifications",
         subtitle = "Calls, missed calls, and connection alerts",
-        onClick = { }
+        onClick = onNavigateToNotifications
       )
 
       SettingsRow(
@@ -282,7 +288,7 @@ fun SettingsScreen(
         .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(18.dp))
     ) {
       SettingsRow(
-        icon = Icons.Default.MenuBook,
+        icon = Icons.AutoMirrored.Filled.MenuBook,
         title = "Guides & Tutorials",
         subtitle = "Volumetric calling, spatial audio & setup tips",
         onClick = onNavigateToGuides,
