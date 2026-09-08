@@ -23,32 +23,73 @@ import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 
 /**
- * Result of on-device monocular depth estimation.
+ * Result of monocular depth estimation combined with person silhouette segmentation.
  *
- * @param depthMap Normalized float depth values in range [0.0..1.0] (higher = closer).
- * @param width Width of depth map (typically 256).
- * @param height Height of depth map (typically 256).
- * @param latencyMs Inference execution time in milliseconds.
+ * @param rawDepthMap Normalized float depth values in range [0.0..1.0] for the entire scene.
+ * @param personMask Foreground person confidence mask in range [0.0..1.0] (1.0 = human subject).
+ * @param maskedDepthMap Depth values isolated to the person's silhouette (background depth is 0.0f).
+ * @param width Width of depth map (256).
+ * @param height Height of depth map (256).
+ * @param depthLatencyMs Depth estimation inference time in milliseconds.
+ * @param segLatencyMs Person segmentation inference time in milliseconds.
+ * @param totalLatencyMs Combined ML inference and processing latency in milliseconds.
  * @param delegateUsed Acceleration delegate utilized ("NNAPI", "GPU", or "CPU").
- * @param depthBitmap Visual representation of the depth map for rendering/preview.
+ * @param rawDepthBitmap Visual color map of full-scene depth.
+ * @param maskedDepthBitmap Visual color map of person-only depth with background zeroed out (black).
  */
 data class DepthResult(
-  val depthMap: FloatArray,
+  val rawDepthMap: FloatArray,
+  val personMask: FloatArray,
+  val maskedDepthMap: FloatArray,
   val width: Int = 256,
   val height: Int = 256,
-  val latencyMs: Long,
-  val delegateUsed: String,
-  val depthBitmap: Bitmap
-)
+  val depthLatencyMs: Long = 0L,
+  val segLatencyMs: Long = 0L,
+  val totalLatencyMs: Long = 0L,
+  val delegateUsed: String = "Unknown",
+  val rawDepthBitmap: Bitmap,
+  val maskedDepthBitmap: Bitmap,
+
+  // Backwards compatibility properties for existing consumers
+  val depthMap: FloatArray = maskedDepthMap,
+  val depthBitmap: Bitmap = maskedDepthBitmap,
+  val latencyMs: Long = totalLatencyMs
+) {
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (javaClass != other?.javaClass) return false
+    other as DepthResult
+    return totalLatencyMs == other.totalLatencyMs &&
+           delegateUsed == other.delegateUsed &&
+           rawDepthBitmap == other.rawDepthBitmap &&
+           maskedDepthBitmap == other.maskedDepthBitmap
+  }
+
+  override fun hashCode(): Int {
+    var result = totalLatencyMs.hashCode()
+    result = 31 * result + delegateUsed.hashCode()
+    result = 31 * result + rawDepthBitmap.hashCode()
+    result = 31 * result + maskedDepthBitmap.hashCode()
+    return result
+  }
+}
 
 /**
- * On-device neural depth estimation engine powered by TensorFlow Lite and MiDaS-small.
- * Supports hardware acceleration via NNAPI delegate with seamless GPU and multi-threaded CPU fallback.
+ * Combined Neural Depth Estimation & Person Segmentation Engine.
+ * Runs MiDaS-small monocular depth alongside MediaPipe Selfie Segmentation
+ * using hardware acceleration (NNAPI / GPU / CPU fallback).
  */
 class DepthEstimator(private val context: Context) {
 
-  private var interpreter: Interpreter? = null
-  private var gpuDelegate: GpuDelegate? = null
+  // MiDaS depth model
+  private var depthInterpreter: Interpreter? = null
+  private var depthGpuDelegate: GpuDelegate? = null
+
+  // MediaPipe selfie segmentation model
+  private var segInterpreter: Interpreter? = null
+  private var segGpuDelegate: GpuDelegate? = null
+  private var segOutputChannels = 1
+
   var delegateUsed: String = "Unknown"
     private set
 
@@ -59,19 +100,28 @@ class DepthEstimator(private val context: Context) {
   private var isProcessing = false
   private var frameCounter = 0
 
-  // Pre-allocated reusable buffers for high-performance memory efficiency
-  private val inputBuffer: ByteBuffer = ByteBuffer.allocateDirect(1 * 256 * 256 * 3 * 4).apply {
+  // Pre-allocated reusable buffers for zero GC overhead during live video
+  private val depthInputBuffer: ByteBuffer = ByteBuffer.allocateDirect(1 * 256 * 256 * 3 * 4).apply {
     order(ByteOrder.nativeOrder())
   }
-  private val outputBuffer = Array(1) { Array(256) { FloatArray(256) } }
-  private val intValues = IntArray(256 * 256)
+  private val depthOutputBuffer = Array(1) { Array(256) { FloatArray(256) } }
 
-  // ImageNet normalization constants used by MiDaS v2.1
+  private val segInputBuffer: ByteBuffer = ByteBuffer.allocateDirect(1 * 256 * 256 * 3 * 4).apply {
+    order(ByteOrder.nativeOrder())
+  }
+  private var segOutputBuffer: ByteBuffer? = null
+
+  private val intValues = IntArray(256 * 256)
+  private val rawPixelBuffer = IntArray(256 * 256)
+  private val maskedPixelBuffer = IntArray(256 * 256)
+
+  // ImageNet normalization constants for MiDaS
   private val mean = floatArrayOf(0.485f, 0.456f, 0.406f)
   private val std = floatArrayOf(0.229f, 0.224f, 0.225f)
 
   init {
-    initInterpreter()
+    initDepthInterpreter()
+    initSegInterpreter()
   }
 
   private fun loadModelFile(modelPath: String): MappedByteBuffer {
@@ -83,7 +133,7 @@ class DepthEstimator(private val context: Context) {
     return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
   }
 
-  private fun initInterpreter() {
+  private fun initDepthInterpreter() {
     val modelBuffer = try {
       loadModelFile("midas_small.tflite")
     } catch (e: Exception) {
@@ -91,58 +141,109 @@ class DepthEstimator(private val context: Context) {
       return
     }
 
-    // Attempt 1: NNAPI Delegate (Android Neural Networks API)
+    // 1. NNAPI Delegate
     try {
       val options = Interpreter.Options().apply {
         setUseNNAPI(true)
         setNumThreads(4)
       }
-      interpreter = Interpreter(modelBuffer, options)
+      depthInterpreter = Interpreter(modelBuffer, options)
       delegateUsed = "NNAPI"
-      Log.i(TAG, "Initialized DepthEstimator with NNAPI acceleration delegate")
+      Log.i(TAG, "Initialized MiDaS depth model with NNAPI delegate")
       return
     } catch (e: Exception) {
-      Log.w(TAG, "NNAPI delegate initialization failed: ${e.message}. Falling back to GPU delegate...")
+      Log.w(TAG, "NNAPI failed for MiDaS: ${e.message}. Trying GPU...")
     }
 
-    // Attempt 2: GPU Delegate Fallback
+    // 2. GPU Delegate Fallback
     try {
       val delegate = GpuDelegate()
-      gpuDelegate = delegate
+      depthGpuDelegate = delegate
       val options = Interpreter.Options().apply {
         addDelegate(delegate)
         setNumThreads(4)
       }
-      interpreter = Interpreter(modelBuffer, options)
+      depthInterpreter = Interpreter(modelBuffer, options)
       delegateUsed = "GPU"
-      Log.i(TAG, "Initialized DepthEstimator with GPU acceleration delegate")
+      Log.i(TAG, "Initialized MiDaS depth model with GPU delegate")
       return
     } catch (e: Exception) {
-      Log.w(TAG, "GPU delegate initialization failed: ${e.message}. Falling back to CPU delegate...")
-      gpuDelegate?.close()
-      gpuDelegate = null
+      Log.w(TAG, "GPU failed for MiDaS: ${e.message}. Falling back to CPU...")
+      depthGpuDelegate?.close()
+      depthGpuDelegate = null
     }
 
-    // Attempt 3: Multi-threaded CPU Fallback
+    // 3. Multi-threaded CPU Fallback
     try {
       val options = Interpreter.Options().apply {
         setNumThreads(4)
       }
-      interpreter = Interpreter(modelBuffer, options)
+      depthInterpreter = Interpreter(modelBuffer, options)
       delegateUsed = "CPU (4-threads)"
-      Log.i(TAG, "Initialized DepthEstimator with CPU multi-threaded delegate")
+      Log.i(TAG, "Initialized MiDaS depth model with CPU delegate")
     } catch (e: Exception) {
-      Log.e(TAG, "Failed initializing TensorFlow Lite Interpreter: ${e.message}", e)
+      Log.e(TAG, "Failed initializing MiDaS depth interpreter: ${e.message}", e)
     }
   }
 
+  private fun initSegInterpreter() {
+    val modelBuffer = try {
+      loadModelFile("selfie_segmentation.tflite")
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed loading selfie_segmentation.tflite from assets: ${e.message}", e)
+      return
+    }
+
+    // Attempt GPU Delegate first for segmentation
+    try {
+      val delegate = GpuDelegate()
+      segGpuDelegate = delegate
+      val options = Interpreter.Options().apply {
+        addDelegate(delegate)
+        setNumThreads(2)
+      }
+      val interp = Interpreter(modelBuffer, options)
+      setupSegOutput(interp)
+      segInterpreter = interp
+      Log.i(TAG, "Initialized Selfie Segmentation with GPU delegate")
+      return
+    } catch (e: Exception) {
+      Log.w(TAG, "GPU failed for Selfie Segmentation: ${e.message}. Trying CPU...")
+      segGpuDelegate?.close()
+      segGpuDelegate = null
+    }
+
+    // CPU fallback
+    try {
+      val options = Interpreter.Options().apply {
+        setNumThreads(3)
+      }
+      val interp = Interpreter(modelBuffer, options)
+      setupSegOutput(interp)
+      segInterpreter = interp
+      Log.i(TAG, "Initialized Selfie Segmentation with CPU delegate")
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed initializing Selfie Segmentation interpreter: ${e.message}", e)
+    }
+  }
+
+  private fun setupSegOutput(interp: Interpreter) {
+    val outputTensor = interp.getOutputTensor(0)
+    val shape = outputTensor.shape()
+    segOutputChannels = shape.getOrNull(3) ?: 1
+    val bytes = 1 * 256 * 256 * segOutputChannels * 4
+    segOutputBuffer = ByteBuffer.allocateDirect(bytes).apply {
+      order(ByteOrder.nativeOrder())
+    }
+    Log.i(TAG, "Selfie Segmentation output shape: ${shape.contentToString()}, channels: $segOutputChannels")
+  }
+
   /**
-   * Processes a CameraX ImageProxy frame, downsampling to every 2nd–3rd frame for performance.
+   * Processes a CameraX ImageProxy frame, sampling every 2nd frame for smooth performance.
    */
   fun processImageProxy(imageProxy: ImageProxy) {
     frameCounter++
-    // Sample every 2nd frame for smooth performance without heating the device
-    if (frameCounter % 2 != 0 || isProcessing || interpreter == null) {
+    if (frameCounter % 2 != 0 || isProcessing || depthInterpreter == null) {
       imageProxy.close()
       return
     }
@@ -163,12 +264,12 @@ class DepthEstimator(private val context: Context) {
         val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         val scaled = Bitmap.createScaledBitmap(rotated, 256, 256, true)
 
-        val result = estimateDepthInternal(scaled, startTime)
+        val result = estimateDepthAndSegmentInternal(scaled, startTime)
         result?.let {
           _latestDepth.value = it
         }
       } catch (e: Exception) {
-        Log.e(TAG, "Error during depth estimation frame processing: ${e.message}", e)
+        Log.e(TAG, "Error during depth & segmentation processing: ${e.message}", e)
       } finally {
         isProcessing = false
         imageProxy.close()
@@ -177,80 +278,141 @@ class DepthEstimator(private val context: Context) {
   }
 
   /**
-   * Executes depth estimation on an input Bitmap.
+   * Executes combined depth estimation and person silhouette segmentation.
    */
-  fun estimateDepth(bitmap: Bitmap): DepthResult? {
-    val tflite = interpreter ?: return null
-    val startTime = SystemClock.elapsedRealtime()
-    val scaled = Bitmap.createScaledBitmap(bitmap, 256, 256, true)
-    return estimateDepthInternal(scaled, startTime)
-  }
+  private fun estimateDepthAndSegmentInternal(scaled: Bitmap, pipelineStartTime: Long): DepthResult? {
+    val depthTflite = depthInterpreter ?: return null
 
-  private fun estimateDepthInternal(scaled: Bitmap, startTime: Long): DepthResult? {
-    val tflite = interpreter ?: return null
-
-    // 1. Prepare input tensor with ImageNet normalization
-    inputBuffer.rewind()
+    // 1. Fill input buffers from the scaled 256x256 bitmap
     scaled.getPixels(intValues, 0, 256, 0, 0, 256, 256)
 
+    depthInputBuffer.rewind()
+    segInputBuffer.rewind()
+
     for (pixel in intValues) {
-      val r = ((pixel shr 16 and 0xFF) / 255.0f - mean[0]) / std[0]
-      val g = ((pixel shr 8 and 0xFF) / 255.0f - mean[1]) / std[1]
-      val b = ((pixel and 0xFF) / 255.0f - mean[2]) / std[2]
-      inputBuffer.putFloat(r)
-      inputBuffer.putFloat(g)
-      inputBuffer.putFloat(b)
+      val rByte = (pixel shr 16 and 0xFF)
+      val gByte = (pixel shr 8 and 0xFF)
+      val bByte = (pixel and 0xFF)
+
+      // MiDaS ImageNet normalization
+      val rNorm = (rByte / 255.0f - mean[0]) / std[0]
+      val gNorm = (gByte / 255.0f - mean[1]) / std[1]
+      val bNorm = (bByte / 255.0f - mean[2]) / std[2]
+      depthInputBuffer.putFloat(rNorm)
+      depthInputBuffer.putFloat(gNorm)
+      depthInputBuffer.putFloat(bNorm)
+
+      // MediaPipe Selfie Segmentation standard [0.0..1.0] normalization
+      segInputBuffer.putFloat(rByte / 255.0f)
+      segInputBuffer.putFloat(gByte / 255.0f)
+      segInputBuffer.putFloat(bByte / 255.0f)
     }
 
-    // 2. Run TFLite inference
+    // 2. Run MiDaS Depth Inference
+    val depthStart = SystemClock.elapsedRealtime()
     synchronized(this) {
-      tflite.run(inputBuffer, outputBuffer)
+      depthTflite.run(depthInputBuffer, depthOutputBuffer)
+    }
+    val depthLatency = SystemClock.elapsedRealtime() - depthStart
+
+    // 3. Run Selfie Segmentation Inference (if available)
+    val segStart = SystemClock.elapsedRealtime()
+    val personMask = FloatArray(256 * 256)
+    var segLatency = 0L
+
+    val segTflite = segInterpreter
+    val segOutBuf = segOutputBuffer
+    if (segTflite != null && segOutBuf != null) {
+      segOutBuf.rewind()
+      synchronized(segTflite) {
+        segTflite.run(segInputBuffer, segOutBuf)
+      }
+      segLatency = SystemClock.elapsedRealtime() - segStart
+
+      segOutBuf.rewind()
+      val floatBuf = segOutBuf.asFloatBuffer()
+      if (segOutputChannels == 1) {
+        floatBuf.get(personMask)
+      } else {
+        // 2 channels: channel 0 is background, channel 1 is person
+        for (i in 0 until 256 * 256) {
+          val bg = floatBuf.get()
+          val person = floatBuf.get()
+          val expPerson = Math.exp(person.toDouble())
+          val expBg = Math.exp(bg.toDouble())
+          personMask[i] = (expPerson / (expPerson + expBg)).toFloat()
+        }
+      }
+    } else {
+      // Fallback: If segmentation is unavailable, assume full scene is foreground
+      personMask.fill(1.0f)
     }
 
-    val latencyMs = SystemClock.elapsedRealtime() - startTime
-
-    // 3. Extract and normalize depth map to [0.0..1.0]
+    // 4. Extract and normalize raw depth map to [0.0..1.0]
     var minVal = Float.MAX_VALUE
     var maxVal = Float.MIN_VALUE
-    val flatDepth = FloatArray(256 * 256)
-    val rawGrid = outputBuffer[0]
+    val flatRawDepth = FloatArray(256 * 256)
+    val rawGrid = depthOutputBuffer[0]
 
     var idx = 0
     for (y in 0 until 256) {
       val row = rawGrid[y]
       for (x in 0 until 256) {
         val v = row[x]
-        flatDepth[idx++] = v
+        flatRawDepth[idx++] = v
         if (v < minVal) minVal = v
         if (v > maxVal) maxVal = v
       }
     }
 
     val range = if (maxVal - minVal > 1e-6f) (maxVal - minVal) else 1.0f
-    val depthPixels = IntArray(256 * 256)
+    val maskedDepth = FloatArray(256 * 256)
+    val personThreshold = 0.5f
 
-    for (i in flatDepth.indices) {
-      val norm = ((flatDepth[i] - minVal) / range).coerceIn(0.0f, 1.0f)
-      flatDepth[i] = norm
+    // 5. Apply silhouette masking and build visualizations
+    for (i in flatRawDepth.indices) {
+      val normDepth = ((flatRawDepth[i] - minVal) / range).coerceIn(0.0f, 1.0f)
+      flatRawDepth[i] = normDepth
 
-      // Color mapping: Turbo / Spectral gradient from blue (far) to red/orange (near)
-      val gray = (norm * 255).toInt()
-      depthPixels[i] = Color.rgb(gray, (gray * 0.8f).toInt(), 255 - gray)
+      // Raw depth Turbo color mapping
+      val gray = (normDepth * 255).toInt()
+      rawPixelBuffer[i] = Color.rgb(gray, (gray * 0.8f).toInt(), 255 - gray)
+
+      // Masked depth: only retain depth values inside person silhouette
+      val isPerson = personMask[i] >= personThreshold
+      if (isPerson) {
+        maskedDepth[i] = normDepth
+        maskedPixelBuffer[i] = rawPixelBuffer[i]
+      } else {
+        maskedDepth[i] = 0.0f
+        // Pure black for background to isolate caller's volumetric silhouette
+        maskedPixelBuffer[i] = Color.BLACK
+      }
     }
 
-    val depthBmp = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888).apply {
-      setPixels(depthPixels, 0, 256, 0, 0, 256, 256)
+    val rawBmp = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888).apply {
+      setPixels(rawPixelBuffer, 0, 256, 0, 0, 256, 256)
+    }
+    val maskedBmp = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888).apply {
+      setPixels(maskedPixelBuffer, 0, 256, 0, 0, 256, 256)
     }
 
-    Log.d(TAG, "Depth inference took ${latencyMs}ms using $delegateUsed delegate (min: %.1f, max: %.1f)".format(minVal, maxVal))
+    val totalLatency = SystemClock.elapsedRealtime() - pipelineStartTime
+
+    Log.d(TAG, "Depth: ${depthLatency}ms | Seg: ${segLatency}ms | Total: ${totalLatency}ms | Delegate: $delegateUsed")
 
     return DepthResult(
-      depthMap = flatDepth,
+      rawDepthMap = flatRawDepth,
+      personMask = personMask,
+      maskedDepthMap = maskedDepth,
       width = 256,
       height = 256,
-      latencyMs = latencyMs,
+      depthLatencyMs = depthLatency,
+      segLatencyMs = segLatency,
+      totalLatencyMs = totalLatency,
       delegateUsed = delegateUsed,
-      depthBitmap = depthBmp
+      rawDepthBitmap = rawBmp,
+      maskedDepthBitmap = maskedBmp
     )
   }
 
@@ -261,10 +423,15 @@ class DepthEstimator(private val context: Context) {
   }
 
   fun close() {
-    interpreter?.close()
-    interpreter = null
-    gpuDelegate?.close()
-    gpuDelegate = null
+    depthInterpreter?.close()
+    depthInterpreter = null
+    depthGpuDelegate?.close()
+    depthGpuDelegate = null
+
+    segInterpreter?.close()
+    segInterpreter = null
+    segGpuDelegate?.close()
+    segGpuDelegate = null
   }
 
   companion object {

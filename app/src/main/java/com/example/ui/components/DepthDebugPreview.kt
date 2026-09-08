@@ -9,6 +9,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +81,7 @@ fun DepthDebugPreviewScreen(
   val latestDepth by depthEstimator.latestDepth.collectAsStateWithLifecycle()
 
   var isFrontCamera by remember { mutableStateOf(true) }
+  var showSegmentedOnly by remember { mutableStateOf(true) }
   val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
   DisposableEffect(Unit) {
@@ -94,7 +96,7 @@ fun DepthDebugPreviewScreen(
       TopAppBar(
         title = {
           Text(
-            "Neural Depth Pipeline (MiDaS)",
+            "Depth & Silhouette Pipeline",
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium
           )
@@ -124,7 +126,7 @@ fun DepthDebugPreviewScreen(
         .fillMaxSize()
         .background(Color(0xFF0F172A))
         .padding(innerPadding)
-        .padding(horizontal = 16.dp, vertical = 12.dp),
+        .padding(horizontal = 16.dp, vertical = 8.dp),
       horizontalAlignment = Alignment.CenterHorizontally
     ) {
       // Telemetry pill HUD
@@ -135,23 +137,30 @@ fun DepthDebugPreviewScreen(
           .clip(RoundedCornerShape(16.dp))
           .background(Color.White.copy(alpha = 0.08f))
           .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-          .padding(horizontal = 14.dp, vertical = 10.dp),
+          .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.Default.Speed,
-            contentDescription = null,
-            tint = LivePrimaryContainer,
-            modifier = Modifier.size(18.dp)
-          )
-          Spacer(modifier = Modifier.width(6.dp))
+        Column {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.Speed,
+              contentDescription = null,
+              tint = LivePrimaryContainer,
+              modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "Depth: ${latestDepth?.depthLatencyMs ?: 0}ms | Seg: ${latestDepth?.segLatencyMs ?: 0}ms",
+              color = Color.White,
+              fontWeight = FontWeight.Bold,
+              fontSize = 12.sp
+            )
+          }
           Text(
-            text = "Latency: ${latestDepth?.latencyMs ?: 0}ms",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 13.sp
+            text = "Total: ${latestDepth?.totalLatencyMs ?: 0}ms",
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 11.sp
           )
         }
 
@@ -162,30 +171,24 @@ fun DepthDebugPreviewScreen(
             .padding(horizontal = 10.dp, vertical = 4.dp)
         ) {
           Text(
-            text = "Acc: ${latestDepth?.delegateUsed ?: depthEstimator.delegateUsed}",
+            text = latestDepth?.delegateUsed ?: depthEstimator.delegateUsed,
             color = LiveSuccess,
             fontWeight = FontWeight.Bold,
             fontSize = 11.sp
           )
         }
-
-        Text(
-          text = "256x256 FP32",
-          color = Color.White.copy(alpha = 0.6f),
-          fontSize = 12.sp
-        )
       }
 
-      Spacer(modifier = Modifier.height(14.dp))
+      Spacer(modifier = Modifier.height(10.dp))
 
       // Upper Half: Live CameraX Feed
       Box(
         modifier = Modifier
           .weight(1f)
           .fillMaxWidth()
-          .clip(RoundedCornerShape(20.dp))
+          .clip(RoundedCornerShape(18.dp))
           .background(Color.Black)
-          .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(20.dp))
+          .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(18.dp))
       ) {
         AndroidView(
           factory = { ctx ->
@@ -231,32 +234,80 @@ fun DepthDebugPreviewScreen(
         Box(
           modifier = Modifier
             .align(Alignment.TopStart)
-            .padding(10.dp)
+            .padding(8.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.Black.copy(alpha = 0.6f))
+            .background(Color.Black.copy(alpha = 0.65f))
             .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-          Text("Camera RGB Feed", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          Text("Live Camera Feed", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
       }
 
-      Spacer(modifier = Modifier.height(12.dp))
+      Spacer(modifier = Modifier.height(8.dp))
 
-      // Lower Half: Neural Depth Map Visualization
+      // Toggle Pill: Segmented vs Raw Depth
+      Row(
+        modifier = Modifier
+          .clip(RoundedCornerShape(99.dp))
+          .background(Color.White.copy(alpha = 0.1f))
+          .padding(4.dp),
+        horizontalArrangement = Arrangement.Center
+      ) {
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .background(if (showSegmentedOnly) LivePrimaryContainer else Color.Transparent)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .clickable { showSegmentedOnly = true },
+          contentAlignment = Alignment.Center
+        ) {
+          Text(
+            text = "Segmented (Person)",
+            color = if (showSegmentedOnly) Color.White else Color.White.copy(alpha = 0.6f),
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp
+          )
+        }
+
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .background(if (!showSegmentedOnly) LivePrimaryContainer else Color.Transparent)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .clickable { showSegmentedOnly = false },
+          contentAlignment = Alignment.Center
+        ) {
+          Text(
+            text = "Raw Depth (Full)",
+            color = if (!showSegmentedOnly) Color.White else Color.White.copy(alpha = 0.6f),
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      // Lower Half: Depth Map Visualization (Masked or Raw)
       Box(
         modifier = Modifier
           .weight(1f)
           .fillMaxWidth()
-          .clip(RoundedCornerShape(20.dp))
+          .clip(RoundedCornerShape(18.dp))
           .background(Color(0xFF020617))
-          .border(1.dp, LivePrimaryContainer.copy(alpha = 0.4f), RoundedCornerShape(20.dp)),
+          .border(1.dp, LivePrimaryContainer.copy(alpha = 0.4f), RoundedCornerShape(18.dp)),
         contentAlignment = Alignment.Center
       ) {
-        val depthBmp = latestDepth?.depthBitmap
+        val depthBmp = if (showSegmentedOnly) {
+          latestDepth?.maskedDepthBitmap ?: latestDepth?.depthBitmap
+        } else {
+          latestDepth?.rawDepthBitmap ?: latestDepth?.depthBitmap
+        }
+
         if (depthBmp != null) {
           Image(
             bitmap = depthBmp.asImageBitmap(),
-            contentDescription = "Live Neural Depth Map",
+            contentDescription = if (showSegmentedOnly) "Masked Depth Map" else "Raw Depth Map",
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize()
           )
@@ -270,7 +321,7 @@ fun DepthDebugPreviewScreen(
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-              "Estimating scene depth...",
+              "Estimating depth & segmenting silhouette...",
               color = Color.White.copy(alpha = 0.7f),
               fontSize = 12.sp
             )
@@ -280,12 +331,17 @@ fun DepthDebugPreviewScreen(
         Box(
           modifier = Modifier
             .align(Alignment.TopStart)
-            .padding(10.dp)
+            .padding(8.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(Color.Black.copy(alpha = 0.65f))
             .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-          Text("Neural Monocular Depth (Normalized)", color = LivePrimaryContainer, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          Text(
+            text = if (showSegmentedOnly) "Silhouette Depth (Background Zeroed)" else "Full Scene Monocular Depth",
+            color = LivePrimaryContainer,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
+          )
         }
       }
     }
