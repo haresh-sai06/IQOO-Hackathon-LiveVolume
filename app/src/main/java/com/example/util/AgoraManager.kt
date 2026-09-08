@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
  * Singleton managing Agora RTC Engine lifecycle, local/remote video feeds,
  * and audio/video controls for real-time two-way calling.
  */
-class AgoraManager private constructor(private val context: Context) {
+class AgoraManager private constructor(private var context: Context?) {
 
   private var rtcEngine: RtcEngine? = null
 
@@ -92,6 +92,12 @@ class AgoraManager private constructor(private val context: Context) {
     }
   }
 
+  fun attachContext(ctx: Context) {
+    if (this.context == null) {
+      this.context = ctx.applicationContext
+    }
+  }
+
   fun setCustomAppId(appId: String) {
     if (appId.isNotBlank() && appId != currentAppId) {
       currentAppId = appId
@@ -100,22 +106,30 @@ class AgoraManager private constructor(private val context: Context) {
     }
   }
 
-  private fun initEngine() {
+  private fun initEngine(fallbackContext: Context? = null) {
     if (rtcEngine != null) return
+
+    val targetContext = (context ?: fallbackContext)?.applicationContext ?: context ?: fallbackContext
+    if (targetContext == null) {
+      Log.w(TAG, "Cannot init Agora RTC Engine: Context is null")
+      return
+    }
+    context = targetContext
 
     val appIdToUse = currentAppId.ifBlank { BuildConfig.AGORA_APP_ID }
     if (appIdToUse.isBlank() || appIdToUse == "YOUR_AGORA_APP_ID") {
       Log.w(TAG, "Agora App ID is not configured. Please set your Agora App ID.")
+      return
     }
 
     try {
       val config = RtcEngineConfig().apply {
-        mContext = context.applicationContext
+        mContext = targetContext
         mAppId = appIdToUse
         mEventHandler = rtcEventHandler
         mChannelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
       }
-      rtcEngine = RtcEngine.create(config).apply {
+      rtcEngine = RtcEngine.create(config)?.apply {
         enableVideo()
         enableAudio()
         setEnableSpeakerphone(true)
@@ -129,7 +143,7 @@ class AgoraManager private constructor(private val context: Context) {
   fun joinChannel(channelName: String, token: String? = null, uid: Int = 0) {
     initEngine()
     val engine = rtcEngine ?: run {
-      Log.e(TAG, "Cannot join channel: RTC Engine is null")
+      Log.w(TAG, "Cannot join channel: RTC Engine is null (App ID not set or initialization pending)")
       return
     }
 
@@ -148,18 +162,28 @@ class AgoraManager private constructor(private val context: Context) {
   }
 
   fun setupLocalVideo(surfaceView: SurfaceView) {
-    initEngine()
+    attachContext(surfaceView.context)
+    initEngine(surfaceView.context)
     val engine = rtcEngine ?: return
-    val canvas = VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, 0)
-    engine.setupLocalVideo(canvas)
-    engine.startPreview()
+    try {
+      val canvas = VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, 0)
+      engine.setupLocalVideo(canvas)
+      engine.startPreview()
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed setupLocalVideo: ${e.message}")
+    }
   }
 
   fun setupRemoteVideo(surfaceView: SurfaceView, uid: Int) {
-    initEngine()
+    attachContext(surfaceView.context)
+    initEngine(surfaceView.context)
     val engine = rtcEngine ?: return
-    val canvas = VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, uid)
-    engine.setupRemoteVideo(canvas)
+    try {
+      val canvas = VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, uid)
+      engine.setupRemoteVideo(canvas)
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed setupRemoteVideo: ${e.message}")
+    }
   }
 
   fun muteLocalAudio(isMuted: Boolean) {
@@ -179,31 +203,31 @@ class AgoraManager private constructor(private val context: Context) {
     rtcEngine?.switchCamera()
   }
 
-  fun enableSpeakerphone(isSpeaker: Boolean) {
-    rtcEngine?.setEnableSpeakerphone(isSpeaker)
+  fun enableSpeakerphone(isEnabled: Boolean) {
+    rtcEngine?.setEnableSpeakerphone(isEnabled)
   }
 
   private fun initDataStream() {
     val engine = rtcEngine ?: return
     try {
-      val config = io.agora.rtc2.DataStreamConfig().apply {
-        syncWithAudio = false
-        ordered = false
-      }
-      dataStreamId = engine.createDataStream(config)
-      Log.i(TAG, "Created Agora Data Stream ID: $dataStreamId")
+      val config = io.agora.rtc2.DataStreamConfig()
+      config.syncWithAudio = false
+      config.ordered = false
+      val streamId = engine.createDataStream(config)
+      dataStreamId = streamId
+      Log.i(TAG, "Created Agora Data Stream with ID: $streamId")
     } catch (e: Exception) {
-      Log.e(TAG, "Failed creating Agora Data Stream: ${e.message}", e)
+      Log.e(TAG, "Failed creating Agora Data Stream: ${e.message}")
     }
   }
 
   fun sendPointCloud(pointCloud: com.example.ml.PointCloud) {
     val engine = rtcEngine ?: return
-    if (!_isJoined.value || dataStreamId == 0) return
+    if (dataStreamId == 0) return
 
+    val chunks = PointCloudStreamer.serializeToChunks(pointCloud, streamFrameId++)
     dataStreamScope.launch {
       try {
-        val chunks = PointCloudStreamer.serializeToChunks(pointCloud, streamFrameId++)
         for (chunk in chunks) {
           engine.sendStreamMessage(dataStreamId, chunk)
         }
@@ -239,9 +263,18 @@ class AgoraManager private constructor(private val context: Context) {
     @Volatile
     private var INSTANCE: AgoraManager? = null
 
-    fun getInstance(context: Context): AgoraManager {
-      return INSTANCE ?: synchronized(this) {
-        INSTANCE ?: AgoraManager(context.applicationContext).also { INSTANCE = it }
+    fun getInstance(context: Context?): AgoraManager {
+      val appCtx = context?.applicationContext ?: context
+      return INSTANCE?.apply {
+        if (this.context == null && appCtx != null) {
+          this.context = appCtx
+        }
+      } ?: synchronized(this) {
+        INSTANCE?.apply {
+          if (this.context == null && appCtx != null) {
+            this.context = appCtx
+          }
+        } ?: AgoraManager(appCtx).also { INSTANCE = it }
       }
     }
   }

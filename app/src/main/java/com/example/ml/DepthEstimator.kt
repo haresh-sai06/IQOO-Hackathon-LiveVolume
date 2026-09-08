@@ -144,9 +144,20 @@ class DepthEstimator(private val context: Context) {
   private val mean = floatArrayOf(0.485f, 0.456f, 0.406f)
   private val std = floatArrayOf(0.229f, 0.224f, 0.225f)
 
+  @Volatile var isReady: Boolean = false
+    private set
+
   init {
-    initDepthInterpreter()
-    initSegInterpreter()
+    CoroutineScope(Dispatchers.Default).launch {
+      try {
+        initDepthInterpreter()
+        initSegInterpreter()
+        isReady = true
+        Log.i(TAG, "DepthEstimator background initialization complete. Ready for inference.")
+      } catch (t: Throwable) {
+        Log.e(TAG, "Failed initializing DepthEstimator: ${t.message}", t)
+      }
+    }
   }
 
   private fun loadModelFile(modelPath: String): MappedByteBuffer {
@@ -161,8 +172,8 @@ class DepthEstimator(private val context: Context) {
   private fun initDepthInterpreter() {
     val modelBuffer = try {
       loadModelFile("midas_small.tflite")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed loading midas_small.tflite from assets: ${e.message}", e)
+    } catch (t: Throwable) {
+      Log.e(TAG, "Failed loading midas_small.tflite from assets: ${t.message}", t)
       return
     }
 
@@ -176,8 +187,8 @@ class DepthEstimator(private val context: Context) {
       delegateUsed = "NNAPI"
       Log.i(TAG, "Initialized MiDaS depth model with NNAPI delegate")
       return
-    } catch (e: Exception) {
-      Log.w(TAG, "NNAPI failed for MiDaS: ${e.message}. Trying GPU...")
+    } catch (t: Throwable) {
+      Log.w(TAG, "NNAPI failed for MiDaS: ${t.message}. Trying GPU...")
     }
 
     // 2. GPU Delegate Fallback
@@ -192,9 +203,9 @@ class DepthEstimator(private val context: Context) {
       delegateUsed = "GPU"
       Log.i(TAG, "Initialized MiDaS depth model with GPU delegate")
       return
-    } catch (e: Exception) {
-      Log.w(TAG, "GPU failed for MiDaS: ${e.message}. Falling back to CPU...")
-      depthGpuDelegate?.close()
+    } catch (t: Throwable) {
+      Log.w(TAG, "GPU failed for MiDaS: ${t.message}. Falling back to CPU...")
+      try { depthGpuDelegate?.close() } catch (ignored: Throwable) {}
       depthGpuDelegate = null
     }
 
@@ -206,16 +217,16 @@ class DepthEstimator(private val context: Context) {
       depthInterpreter = Interpreter(modelBuffer, options)
       delegateUsed = "CPU (4-threads)"
       Log.i(TAG, "Initialized MiDaS depth model with CPU delegate")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed initializing MiDaS depth interpreter: ${e.message}", e)
+    } catch (t: Throwable) {
+      Log.e(TAG, "Failed initializing MiDaS depth interpreter: ${t.message}", t)
     }
   }
 
   private fun initSegInterpreter() {
     val modelBuffer = try {
       loadModelFile("selfie_segmentation.tflite")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed loading selfie_segmentation.tflite from assets: ${e.message}", e)
+    } catch (t: Throwable) {
+      Log.e(TAG, "Failed loading selfie_segmentation.tflite from assets: ${t.message}", t)
       return
     }
 
@@ -232,9 +243,9 @@ class DepthEstimator(private val context: Context) {
       segInterpreter = interp
       Log.i(TAG, "Initialized Selfie Segmentation with GPU delegate")
       return
-    } catch (e: Exception) {
-      Log.w(TAG, "GPU failed for Selfie Segmentation: ${e.message}. Trying CPU...")
-      segGpuDelegate?.close()
+    } catch (t: Throwable) {
+      Log.w(TAG, "GPU failed for Selfie Segmentation: ${t.message}. Trying CPU...")
+      try { segGpuDelegate?.close() } catch (ignored: Throwable) {}
       segGpuDelegate = null
     }
 
@@ -247,8 +258,8 @@ class DepthEstimator(private val context: Context) {
       setupSegOutput(interp)
       segInterpreter = interp
       Log.i(TAG, "Initialized Selfie Segmentation with CPU delegate")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed initializing Selfie Segmentation interpreter: ${e.message}", e)
+    } catch (t: Throwable) {
+      Log.e(TAG, "Failed initializing Selfie Segmentation interpreter: ${t.message}", t)
     }
   }
 

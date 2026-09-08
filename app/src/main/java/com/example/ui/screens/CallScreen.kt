@@ -101,6 +101,9 @@ fun CallScreen(
   val elapsedDurationFormatted by viewModel.elapsedDurationFormatted.collectAsStateWithLifecycle()
 
   val context = LocalContext.current
+  LaunchedEffect(context) {
+    viewModel.agoraManager.attachContext(context)
+  }
   val callHistoryRepository = remember { CallHistoryRepository.getInstance(context) }
   val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
   val activeSession by signalingRepo.activeSession.collectAsStateWithLifecycle()
@@ -198,9 +201,11 @@ fun CallScreen(
     viewModel.initializeCall(callerName, channelName)
   }
 
+  val callStartTime = remember { System.currentTimeMillis() }
   // React to remote user declining or ending the call
   LaunchedEffect(activeSession?.state) {
-    if (activeSession?.state == CallSessionState.REJECTED) {
+    val session = activeSession ?: return@LaunchedEffect
+    if (session.state == CallSessionState.REJECTED) {
       InAppNotificationManager.postNotification(
         title = "Call Declined",
         message = "$callerName declined the call.",
@@ -208,7 +213,7 @@ fun CallScreen(
         context = context
       )
       onEndCall()
-    } else if (activeSession?.state == CallSessionState.ENDED && activeSession?.callId?.isNotBlank() == true) {
+    } else if (session.state == CallSessionState.ENDED && (System.currentTimeMillis() - callStartTime > 1500L)) {
       onEndCall()
     }
   }

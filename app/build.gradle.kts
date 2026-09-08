@@ -118,6 +118,7 @@ dependencies {
   implementation(libs.agora.rtc)
   implementation(libs.tensorflow.lite)
   implementation(libs.tensorflow.lite.gpu)
+  implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
   // implementation(libs.androidx.credentials)
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)
