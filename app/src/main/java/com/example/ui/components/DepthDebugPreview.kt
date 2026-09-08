@@ -81,7 +81,7 @@ fun DepthDebugPreviewScreen(
   val latestDepth by depthEstimator.latestDepth.collectAsStateWithLifecycle()
 
   var isFrontCamera by remember { mutableStateOf(true) }
-  var showSegmentedOnly by remember { mutableStateOf(true) }
+  var viewMode by remember { mutableStateOf(PreviewViewMode.POINT_CLOUD_3D) }
   val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
   DisposableEffect(Unit) {
@@ -96,7 +96,7 @@ fun DepthDebugPreviewScreen(
       TopAppBar(
         title = {
           Text(
-            "Depth & Silhouette Pipeline",
+            "Volumetric 3D Pipeline",
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium
           )
@@ -126,7 +126,7 @@ fun DepthDebugPreviewScreen(
         .fillMaxSize()
         .background(Color(0xFF0F172A))
         .padding(innerPadding)
-        .padding(horizontal = 16.dp, vertical = 8.dp),
+        .padding(horizontal = 14.dp, vertical = 6.dp),
       horizontalAlignment = Alignment.CenterHorizontally
     ) {
       // Telemetry pill HUD
@@ -154,12 +154,12 @@ fun DepthDebugPreviewScreen(
               text = "Depth: ${latestDepth?.depthLatencyMs ?: 0}ms | Seg: ${latestDepth?.segLatencyMs ?: 0}ms",
               color = Color.White,
               fontWeight = FontWeight.Bold,
-              fontSize = 12.sp
+              fontSize = 11.sp
             )
           }
           Text(
-            text = "Total: ${latestDepth?.totalLatencyMs ?: 0}ms",
-            color = Color.White.copy(alpha = 0.7f),
+            text = "Total: ${latestDepth?.totalLatencyMs ?: 0}ms | Points: ${latestDepth?.pointCloud?.pointCount ?: 0}",
+            color = Color.White.copy(alpha = 0.75f),
             fontSize = 11.sp
           )
         }
@@ -179,16 +179,16 @@ fun DepthDebugPreviewScreen(
         }
       }
 
-      Spacer(modifier = Modifier.height(10.dp))
+      Spacer(modifier = Modifier.height(8.dp))
 
       // Upper Half: Live CameraX Feed
       Box(
         modifier = Modifier
           .weight(1f)
           .fillMaxWidth()
-          .clip(RoundedCornerShape(18.dp))
+          .clip(RoundedCornerShape(16.dp))
           .background(Color.Black)
-          .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(18.dp))
+          .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
       ) {
         AndroidView(
           factory = { ctx ->
@@ -239,95 +239,155 @@ fun DepthDebugPreviewScreen(
             .background(Color.Black.copy(alpha = 0.65f))
             .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-          Text("Live Camera Feed", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          Text("Camera RGB Feed", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
       }
 
       Spacer(modifier = Modifier.height(8.dp))
 
-      // Toggle Pill: Segmented vs Raw Depth
+      // 3-Way Mode Toggle Pill: 3D Orbit vs Silhouette vs Raw Depth
       Row(
         modifier = Modifier
           .clip(RoundedCornerShape(99.dp))
           .background(Color.White.copy(alpha = 0.1f))
-          .padding(4.dp),
+          .padding(3.dp),
         horizontalArrangement = Arrangement.Center
       ) {
         Box(
           modifier = Modifier
             .clip(RoundedCornerShape(99.dp))
-            .background(if (showSegmentedOnly) LivePrimaryContainer else Color.Transparent)
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-            .clickable { showSegmentedOnly = true },
+            .background(if (viewMode == PreviewViewMode.POINT_CLOUD_3D) LivePrimaryContainer else Color.Transparent)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clickable { viewMode = PreviewViewMode.POINT_CLOUD_3D },
           contentAlignment = Alignment.Center
         ) {
           Text(
-            text = "Segmented (Person)",
-            color = if (showSegmentedOnly) Color.White else Color.White.copy(alpha = 0.6f),
+            text = "3D Orbit",
+            color = if (viewMode == PreviewViewMode.POINT_CLOUD_3D) Color.White else Color.White.copy(alpha = 0.6f),
             fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
+            fontSize = 11.sp
           )
         }
 
         Box(
           modifier = Modifier
             .clip(RoundedCornerShape(99.dp))
-            .background(if (!showSegmentedOnly) LivePrimaryContainer else Color.Transparent)
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-            .clickable { showSegmentedOnly = false },
+            .background(if (viewMode == PreviewViewMode.SEGMENTED_2D) LivePrimaryContainer else Color.Transparent)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clickable { viewMode = PreviewViewMode.SEGMENTED_2D },
           contentAlignment = Alignment.Center
         ) {
           Text(
-            text = "Raw Depth (Full)",
-            color = if (!showSegmentedOnly) Color.White else Color.White.copy(alpha = 0.6f),
+            text = "Silhouette",
+            color = if (viewMode == PreviewViewMode.SEGMENTED_2D) Color.White else Color.White.copy(alpha = 0.6f),
             fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
+            fontSize = 11.sp
+          )
+        }
+
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .background(if (viewMode == PreviewViewMode.RAW_DEPTH_2D) LivePrimaryContainer else Color.Transparent)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clickable { viewMode = PreviewViewMode.RAW_DEPTH_2D },
+          contentAlignment = Alignment.Center
+        ) {
+          Text(
+            text = "Raw Depth",
+            color = if (viewMode == PreviewViewMode.RAW_DEPTH_2D) Color.White else Color.White.copy(alpha = 0.6f),
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp
           )
         }
       }
 
       Spacer(modifier = Modifier.height(8.dp))
 
-      // Lower Half: Depth Map Visualization (Masked or Raw)
+      // Lower Half: 3D Point Cloud Orbit OR 2D Depth Maps
       Box(
         modifier = Modifier
           .weight(1f)
           .fillMaxWidth()
-          .clip(RoundedCornerShape(18.dp))
+          .clip(RoundedCornerShape(16.dp))
           .background(Color(0xFF020617))
-          .border(1.dp, LivePrimaryContainer.copy(alpha = 0.4f), RoundedCornerShape(18.dp)),
+          .border(1.dp, LivePrimaryContainer.copy(alpha = 0.45f), RoundedCornerShape(16.dp)),
         contentAlignment = Alignment.Center
       ) {
-        val depthBmp = if (showSegmentedOnly) {
-          latestDepth?.maskedDepthBitmap ?: latestDepth?.depthBitmap
-        } else {
-          latestDepth?.rawDepthBitmap ?: latestDepth?.depthBitmap
-        }
+        when (viewMode) {
+          PreviewViewMode.POINT_CLOUD_3D -> {
+            VolumetricVisualizer(
+              pointCloud = latestDepth?.pointCloud,
+              modifier = Modifier.fillMaxSize()
+            )
 
-        if (depthBmp != null) {
-          Image(
-            bitmap = depthBmp.asImageBitmap(),
-            contentDescription = if (showSegmentedOnly) "Masked Depth Map" else "Raw Depth Map",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
-          )
-        } else {
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // Orbit instruction badge
             Box(
               modifier = Modifier
-                .size(12.dp)
-                .clip(CircleShape)
-                .background(LivePrimaryContainer)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-              "Estimating depth & segmenting silhouette...",
-              color = Color.White.copy(alpha = 0.7f),
-              fontSize = 12.sp
-            )
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 10.dp)
+                .clip(RoundedCornerShape(99.dp))
+                .background(Color.Black.copy(alpha = 0.7f))
+                .border(0.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(99.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+              Text(
+                text = "Drag to orbit 3D • Pinch to zoom",
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+              )
+            }
+          }
+
+          PreviewViewMode.SEGMENTED_2D -> {
+            val bmp = latestDepth?.maskedDepthBitmap ?: latestDepth?.depthBitmap
+            if (bmp != null) {
+              Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = "Masked Depth Map",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+              )
+            } else {
+              Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                  modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(LivePrimaryContainer)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Computing silhouette depth...", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+              }
+            }
+          }
+
+          PreviewViewMode.RAW_DEPTH_2D -> {
+            val bmp = latestDepth?.rawDepthBitmap ?: latestDepth?.depthBitmap
+            if (bmp != null) {
+              Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = "Raw Depth Map",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+              )
+            } else {
+              Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                  modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(LivePrimaryContainer)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Computing full scene depth...", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+              }
+            }
           }
         }
 
+        // Top-left label badge
         Box(
           modifier = Modifier
             .align(Alignment.TopStart)
@@ -336,14 +396,20 @@ fun DepthDebugPreviewScreen(
             .background(Color.Black.copy(alpha = 0.65f))
             .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-          Text(
-            text = if (showSegmentedOnly) "Silhouette Depth (Background Zeroed)" else "Full Scene Monocular Depth",
-            color = LivePrimaryContainer,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold
-          )
+          val label = when (viewMode) {
+            PreviewViewMode.POINT_CLOUD_3D -> "3D Volumetric Point Cloud (Live)"
+            PreviewViewMode.SEGMENTED_2D -> "Silhouette Depth (Background Zeroed)"
+            PreviewViewMode.RAW_DEPTH_2D -> "Full Scene Depth (Raw Disparity)"
+          }
+          Text(text = label, color = LivePrimaryContainer, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
       }
     }
   }
+}
+
+enum class PreviewViewMode {
+  POINT_CLOUD_3D,
+  SEGMENTED_2D,
+  RAW_DEPTH_2D
 }

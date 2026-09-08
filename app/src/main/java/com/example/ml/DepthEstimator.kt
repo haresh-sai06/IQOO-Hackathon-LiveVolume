@@ -23,11 +23,34 @@ import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 
 /**
+ * Interleaved 3D Point Cloud geometry: [X, Y, Z, R, G, B,  X, Y, Z, R, G, B, ...]
+ */
+data class PointCloud(
+  val vertexData: FloatArray,
+  val pointCount: Int,
+  val timestamp: Long = System.currentTimeMillis()
+) {
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (javaClass != other?.javaClass) return false
+    other as PointCloud
+    return pointCount == other.pointCount && timestamp == other.timestamp
+  }
+
+  override fun hashCode(): Int {
+    var result = pointCount
+    result = 31 * result + timestamp.hashCode()
+    return result
+  }
+}
+
+/**
  * Result of monocular depth estimation combined with person silhouette segmentation.
  *
  * @param rawDepthMap Normalized float depth values in range [0.0..1.0] for the entire scene.
  * @param personMask Foreground person confidence mask in range [0.0..1.0] (1.0 = human subject).
  * @param maskedDepthMap Depth values isolated to the person's silhouette (background depth is 0.0f).
+ * @param pointCloud Unprojected 3D colored point cloud of the person's volumetric silhouette.
  * @param width Width of depth map (256).
  * @param height Height of depth map (256).
  * @param depthLatencyMs Depth estimation inference time in milliseconds.
@@ -41,6 +64,7 @@ data class DepthResult(
   val rawDepthMap: FloatArray,
   val personMask: FloatArray,
   val maskedDepthMap: FloatArray,
+  val pointCloud: PointCloud? = null,
   val width: Int = 256,
   val height: Int = 256,
   val depthLatencyMs: Long = 0L,
@@ -114,6 +138,7 @@ class DepthEstimator(private val context: Context) {
   private val intValues = IntArray(256 * 256)
   private val rawPixelBuffer = IntArray(256 * 256)
   private val maskedPixelBuffer = IntArray(256 * 256)
+  private val pointCloudBuffer = FloatArray(16384 * 6)
 
   // ImageNet normalization constants for MiDaS
   private val mean = floatArrayOf(0.485f, 0.456f, 0.406f)
@@ -397,14 +422,54 @@ class DepthEstimator(private val context: Context) {
       setPixels(maskedPixelBuffer, 0, 256, 0, 0, 256, 256)
     }
 
+    // 6. Generate 3D point cloud from masked depth & camera RGB (Phase 5)
+    var pointCount = 0
+    val focalLength = 220f
+    val stride = 2 // Downsample by 2x for optimal 5,000-12,000 point density
+
+    for (y in 0 until 256 step stride) {
+      for (x in 0 until 256 step stride) {
+        val idx = y * 256 + x
+        val d = maskedDepth[idx]
+        if (d <= 0.005f) continue // Skip background
+
+        val z = 0.75f + (1.0f - d) * 1.15f
+        val worldX = ((x - 128f) / focalLength) * z
+        val worldY = -((y - 128f) / focalLength) * z
+        val worldZ = -z
+
+        val pixel = intValues[idx]
+        val r = (pixel shr 16 and 0xFF) / 255.0f
+        val g = (pixel shr 8 and 0xFF) / 255.0f
+        val b = (pixel and 0xFF) / 255.0f
+
+        val base = pointCount * 6
+        if (base + 5 < pointCloudBuffer.size) {
+          pointCloudBuffer[base] = worldX
+          pointCloudBuffer[base + 1] = worldY
+          pointCloudBuffer[base + 2] = worldZ
+          pointCloudBuffer[base + 3] = r
+          pointCloudBuffer[base + 4] = g
+          pointCloudBuffer[base + 5] = b
+          pointCount++
+        }
+      }
+    }
+
+    val pointCloud = PointCloud(
+      vertexData = pointCloudBuffer.copyOf(pointCount * 6),
+      pointCount = pointCount
+    )
+
     val totalLatency = SystemClock.elapsedRealtime() - pipelineStartTime
 
-    Log.d(TAG, "Depth: ${depthLatency}ms | Seg: ${segLatency}ms | Total: ${totalLatency}ms | Delegate: $delegateUsed")
+    Log.d(TAG, "Depth: ${depthLatency}ms | Seg: ${segLatency}ms | Pts: $pointCount | Total: ${totalLatency}ms | Delegate: $delegateUsed")
 
     return DepthResult(
       rawDepthMap = flatRawDepth,
       personMask = personMask,
       maskedDepthMap = maskedDepth,
+      pointCloud = pointCloud,
       width = 256,
       height = 256,
       depthLatencyMs = depthLatency,
