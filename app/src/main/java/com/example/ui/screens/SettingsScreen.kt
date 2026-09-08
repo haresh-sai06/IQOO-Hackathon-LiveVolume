@@ -76,6 +76,7 @@ fun SettingsScreen(
   onNavigateToAbout: () -> Unit,
   onNavigateToPrivacy: () -> Unit,
   onNavigateToNotifications: () -> Unit = {},
+  onNavigateToDepthDebug: () -> Unit = {},
   onLogOut: () -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -246,6 +247,13 @@ fun SettingsScreen(
           colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = LivePrimaryContainer)
         )
       }
+
+      SettingsRow(
+        icon = Icons.Default.ViewInAr,
+        title = "Neural Depth Estimation (MiDaS AI)",
+        subtitle = "Live on-device depth map inference & latency telemetry",
+        onClick = onNavigateToDepthDebug
+      )
     }
 
     Spacer(modifier = Modifier.height(24.dp))

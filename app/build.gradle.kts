@@ -68,6 +68,9 @@ android {
     includeInApk = false
     includeInBundle = true
   }
+  androidResources {
+    noCompress += "tflite"
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -113,6 +116,8 @@ dependencies {
   implementation(libs.firebase.auth)
   implementation(libs.firebase.messaging)
   implementation(libs.agora.rtc)
+  implementation(libs.tensorflow.lite)
+  implementation(libs.tensorflow.lite.gpu)
   // implementation(libs.androidx.credentials)
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)

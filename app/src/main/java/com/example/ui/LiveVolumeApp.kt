@@ -34,6 +34,7 @@ import com.example.ui.screens.RecentsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.WelcomeScreen
 
+import com.example.ui.components.DepthDebugPreviewScreen
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
@@ -74,6 +75,7 @@ sealed class Screen(val route: String) {
   data object About : Screen("about")
   data object Privacy : Screen("privacy")
   data object Notifications : Screen("notifications")
+  data object DepthDebug : Screen("depth_debug")
 }
 
 @Composable
@@ -163,6 +165,9 @@ fun LiveVolumeApp() {
         },
         onNavigateToNotifications = {
           navController.navigate(Screen.Notifications.route)
+        },
+        onNavigateToDepthDebug = {
+          navController.navigate(Screen.DepthDebug.route)
         },
         onLogOut = {
           authRepository.signOut()
@@ -269,6 +274,14 @@ fun LiveVolumeApp() {
         }
       )
     }
+
+    composable(Screen.DepthDebug.route) {
+      DepthDebugPreviewScreen(
+        onBack = {
+          navController.popBackStack()
+        }
+      )
+    }
   }
 
   // Floating In-App Push Notification Banner (FCM / Realtime alerts)
@@ -328,6 +341,7 @@ fun MainShellScreen(
   onNavigateToAbout: () -> Unit,
   onNavigateToPrivacy: () -> Unit,
   onNavigateToNotifications: () -> Unit,
+  onNavigateToDepthDebug: () -> Unit,
   onLogOut: () -> Unit
 ) {
   var currentTab by remember { mutableStateOf(NavigationTab.RECENTS) }
@@ -363,6 +377,7 @@ fun MainShellScreen(
           onNavigateToAbout = onNavigateToAbout,
           onNavigateToPrivacy = onNavigateToPrivacy,
           onNavigateToNotifications = onNavigateToNotifications,
+          onNavigateToDepthDebug = onNavigateToDepthDebug,
           onLogOut = onLogOut
         )
       }
