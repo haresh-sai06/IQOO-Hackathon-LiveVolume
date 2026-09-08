@@ -50,6 +50,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.repository.RealtimeContactsRepository
 import com.example.model.Contact
 import com.example.model.DataRepository
 import com.example.ui.components.LiveVolumeAvatar
@@ -60,12 +67,21 @@ fun ContactsScreen(
   onStartCall: (contactName: String) -> Unit,
   modifier: Modifier = Modifier
 ) {
+  val context = LocalContext.current
+  val contactsRepository = remember { RealtimeContactsRepository.getInstance(context) }
+  val allContacts by contactsRepository.contactsFlow.collectAsStateWithLifecycle()
+
   var searchQuery by remember { mutableStateOf("") }
   var selectedFilter by remember { mutableStateOf("All") }
   val filters = listOf("All", "3D Ready", "Favorites", "Recent")
 
-  val filteredContacts = remember(searchQuery, selectedFilter) {
-    DataRepository.allContacts.filter { contact ->
+  var showAddDialog by remember { mutableStateOf(false) }
+  var newContactName by remember { mutableStateOf("") }
+  var newContactPhone by remember { mutableStateOf("") }
+  var newContact3DReady by remember { mutableStateOf(true) }
+
+  val filteredContacts = remember(searchQuery, selectedFilter, allContacts) {
+    allContacts.filter { contact ->
       val matchesSearch = contact.name.contains(searchQuery, ignoreCase = true) ||
         contact.phone.contains(searchQuery)
       val matchesFilter = when (selectedFilter) {
@@ -79,6 +95,68 @@ fun ContactsScreen(
 
   val groupedContacts = remember(filteredContacts) {
     filteredContacts.groupBy { it.section }
+  }
+
+  if (showAddDialog) {
+    AlertDialog(
+      onDismissRequest = { showAddDialog = false },
+      title = { Text("Add New Contact", fontWeight = FontWeight.Bold) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          OutlinedTextField(
+            value = newContactName,
+            onValueChange = { newContactName = it },
+            label = { Text("Full Name") },
+            placeholder = { Text("e.g. Jordan Lee") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+          OutlinedTextField(
+            value = newContactPhone,
+            onValueChange = { newContactPhone = it },
+            label = { Text("Phone Number") },
+            placeholder = { Text("+1 (555) 000-0000") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text("Enable 3D Spatial Audio", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+              checked = newContact3DReady,
+              onCheckedChange = { newContact3DReady = it },
+              colors = SwitchDefaults.colors(checkedThumbColor = LivePrimaryContainer)
+            )
+          }
+        }
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            if (newContactName.isNotBlank()) {
+              contactsRepository.addContact(
+                name = newContactName.trim(),
+                phone = newContactPhone.ifBlank { "+1 (555) 123-4567" },
+                isSpatialReady = newContact3DReady
+              )
+              newContactName = ""
+              newContactPhone = ""
+              showAddDialog = false
+            }
+          }
+        ) {
+          Text("Save Contact", fontWeight = FontWeight.Bold, color = LivePrimaryContainer)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showAddDialog = false }) {
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+      }
+    )
   }
 
   Column(
@@ -102,14 +180,14 @@ fun ContactsScreen(
           color = MaterialTheme.colorScheme.onSurface
         )
         Text(
-          text = "142 people • 28 ready for 3D live spatial audio",
+          text = "${allContacts.size} people • ${allContacts.count { it.isSpatialReady }} ready for 3D live spatial audio",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant
         )
       }
 
       IconButton(
-        onClick = { },
+        onClick = { showAddDialog = true },
         modifier = Modifier
           .size(40.dp)
           .clip(CircleShape)

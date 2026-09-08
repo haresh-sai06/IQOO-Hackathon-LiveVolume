@@ -3,6 +3,8 @@ package com.example.viewmodel
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.model.VolumetricMeshMode
+import com.example.service.AudioProcessingService
 import com.example.ui.theme.LiveError
 import com.example.ui.theme.LiveSuccess
 import kotlinx.coroutines.Job
@@ -53,7 +55,14 @@ data class CallUiState(
   val audioPermissionGranted: Boolean = false,
   val latencyMs: Int = 22,
   val connectionQuality: ConnectionQualityLevel = ConnectionQualityLevel.EXCELLENT,
-  val fps: Int = 60
+  val fps: Int = 60,
+  val meshMode: VolumetricMeshMode = VolumetricMeshMode.HOLOGRAPHIC_MESH,
+  val depthIntensity: Float = 1.0f,
+  val isGyroTrackingEnabled: Boolean = true,
+  val audioLevel: Float = 0.25f,
+  val azimuth: Float = 0f,
+  val elevation: Float = 0f,
+  val showOpticsSheet: Boolean = false
 )
 
 class CallViewModel : ViewModel() {
@@ -81,6 +90,11 @@ class CallViewModel : ViewModel() {
   init {
     startCallTimer()
     startLatencyMonitoring()
+    viewModelScope.launch {
+      AudioProcessingService.sharedAudioLevel.collect { level ->
+        _uiState.update { it.copy(audioLevel = level) }
+      }
+    }
   }
 
   fun initializeCall(callerName: String) {
@@ -226,6 +240,35 @@ class CallViewModel : ViewModel() {
    */
   fun toggle3DMode() {
     _uiState.update { it.copy(is3DMode = !it.is3DMode) }
+  }
+
+  fun setMeshMode(mode: VolumetricMeshMode) {
+    _uiState.update { it.copy(meshMode = mode) }
+  }
+
+  fun setDepthIntensity(intensity: Float) {
+    _uiState.update { it.copy(depthIntensity = intensity.coerceIn(0.4f, 2.5f)) }
+  }
+
+  fun toggleGyroTracking() {
+    _uiState.update { it.copy(isGyroTrackingEnabled = !it.isGyroTrackingEnabled) }
+  }
+
+  fun toggleOpticsSheet() {
+    _uiState.update { it.copy(showOpticsSheet = !it.showOpticsSheet) }
+  }
+
+  fun updateOrientation(rotX: Float, rotY: Float) {
+    val azimuth = (rotY * 4.5f).coerceIn(-90f, 90f)
+    val elevation = (-rotX * 4.5f).coerceIn(-90f, 90f)
+    _uiState.update {
+      it.copy(
+        azimuth = azimuth,
+        elevation = elevation
+      )
+    }
+    AudioProcessingService.sharedAzimuth.value = azimuth
+    AudioProcessingService.sharedElevation.value = elevation
   }
 
   /**

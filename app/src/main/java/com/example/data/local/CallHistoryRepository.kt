@@ -6,16 +6,55 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
+import android.util.Log
+import com.google.firebase.FirebaseApp
+import com.google.firebase.firestore.FirebaseFirestore
+
 /**
- * Repository abstracting Room database operations for call history.
+ * Repository abstracting Room database operations for call history
+ * with optional Cloud Firestore synchronization.
  */
-class CallHistoryRepository(private val dao: CallHistoryDao) {
+class CallHistoryRepository(
+  private val dao: CallHistoryDao,
+  private val context: Context? = null
+) {
 
   val allCallHistory: Flow<List<CallHistoryEntity>> = dao.getAllCallHistory()
 
   fun searchCalls(query: String): Flow<List<CallHistoryEntity>> = dao.searchCallHistory(query)
 
-  suspend fun insertCall(call: CallHistoryEntity): Long = dao.insertCall(call)
+  suspend fun insertCall(call: CallHistoryEntity): Long {
+    val localId = dao.insertCall(call)
+    syncCallToFirestore(call.copy(id = localId))
+    return localId
+  }
+
+  private fun syncCallToFirestore(call: CallHistoryEntity) {
+    try {
+      val ctx = context ?: return
+      if (FirebaseApp.getApps(ctx).isNotEmpty()) {
+        val db = FirebaseFirestore.getInstance()
+        val data = hashMapOf(
+          "contactName" to call.contactName,
+          "phoneNumber" to call.phoneNumber,
+          "avatarUrl" to call.avatarUrl,
+          "initials" to call.initials,
+          "callType" to call.callType,
+          "direction" to call.direction,
+          "durationSeconds" to call.durationSeconds,
+          "durationFormatted" to call.durationFormatted,
+          "timestamp" to call.timestamp,
+          "timestampFormatted" to call.timestampFormatted,
+          "period" to call.period,
+          "isOnline" to call.isOnline,
+          "isSpatial" to call.isSpatial
+        )
+        db.collection("call_history").document("call_${call.id}").set(data)
+      }
+    } catch (e: Exception) {
+      Log.w("CallHistoryRepo", "Firestore call history sync skipped: ${e.message}")
+    }
+  }
 
   suspend fun insertCalls(calls: List<CallHistoryEntity>) = dao.insertAll(calls)
 
@@ -116,7 +155,7 @@ class CallHistoryRepository(private val dao: CallHistoryDao) {
     fun getInstance(context: Context): CallHistoryRepository {
       return INSTANCE ?: synchronized(this) {
         val database = AppDatabase.getDatabase(context)
-        val repo = CallHistoryRepository(database.callHistoryDao())
+        val repo = CallHistoryRepository(database.callHistoryDao(), context.applicationContext)
         INSTANCE = repo
         CoroutineScope(Dispatchers.IO).launch {
           repo.seedInitialDataIfEmpty()

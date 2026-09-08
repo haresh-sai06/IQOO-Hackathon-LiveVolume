@@ -62,6 +62,12 @@ import coil.compose.AsyncImage
 import com.example.model.DataRepository
 import com.example.ui.theme.LivePrimaryContainer
 
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import com.example.data.repository.AuthRepository
+import kotlinx.coroutines.launch
+
 @Composable
 fun AuthScreen(
   onBack: () -> Unit,
@@ -69,13 +75,37 @@ fun AuthScreen(
   onTermsClick: () -> Unit,
   modifier: Modifier = Modifier
 ) {
+  val context = LocalContext.current
+  val authRepository = remember { AuthRepository.getInstance(context) }
+  val scope = rememberCoroutineScope()
+
   var isRegisterMode by remember { mutableStateOf(false) }
   var fullName by remember { mutableStateOf("") }
   var emailOrPhone by remember { mutableStateOf("alex@example.com") }
-  var password by remember { mutableStateOf("") }
+  var password by remember { mutableStateOf("Password123!") }
   var isPasswordVisible by remember { mutableStateOf(false) }
   var rememberMe by remember { mutableStateOf(true) }
   var agreeTerms by remember { mutableStateOf(true) }
+  var isLoading by remember { mutableStateOf(false) }
+  var errorMessage by remember { mutableStateOf<String?>(null) }
+
+  val handleAuth: () -> Unit = {
+    scope.launch {
+      isLoading = true
+      errorMessage = null
+      val result = if (isRegisterMode) {
+        authRepository.register(fullName.ifBlank { "Alex Rivera" }, emailOrPhone, password)
+      } else {
+        authRepository.signIn(emailOrPhone, password)
+      }
+      isLoading = false
+      result.onSuccess {
+        onAuthSuccess()
+      }.onFailure {
+        errorMessage = it.message ?: "Authentication failed"
+      }
+    }
+  }
 
   val scrollState = rememberScrollState()
 
@@ -440,11 +470,30 @@ fun AuthScreen(
       }
     }
 
+    // Error Banner if auth fails
+    AnimatedVisibility(visible = errorMessage != null) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .background(Color(0xFFFEE2E2))
+          .border(1.dp, Color(0xFFFCA5A5), RoundedCornerShape(12.dp))
+          .padding(12.dp)
+      ) {
+        Text(
+          text = errorMessage ?: "",
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFFB91C1C)
+        )
+      }
+    }
+
     Spacer(modifier = Modifier.height(16.dp))
 
     // Primary CTA Button
     Button(
-      onClick = onAuthSuccess,
+      onClick = handleAuth,
+      enabled = !isLoading,
       modifier = Modifier
         .fillMaxWidth()
         .height(52.dp)
@@ -452,19 +501,27 @@ fun AuthScreen(
       shape = RoundedCornerShape(99.dp),
       colors = ButtonDefaults.buttonColors(containerColor = LivePrimaryContainer)
     ) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-          text = if (isRegisterMode) "Create Account" else "Sign In",
-          style = MaterialTheme.typography.labelLarge,
-          fontWeight = FontWeight.Bold,
-          fontSize = 16.sp
+      if (isLoading) {
+        CircularProgressIndicator(
+          color = Color.White,
+          strokeWidth = 2.dp,
+          modifier = Modifier.size(22.dp)
         )
-        Spacer(modifier = Modifier.width(8.dp))
-        Icon(
-          imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-          contentDescription = null,
-          modifier = Modifier.size(18.dp)
-        )
+      } else {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(
+            text = if (isRegisterMode) "Create Account" else "Sign In",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+          )
+        }
       }
     }
 
@@ -499,7 +556,12 @@ fun AuthScreen(
           .clip(RoundedCornerShape(16.dp))
           .background(Color.White)
           .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(16.dp))
-          .clickable { onAuthSuccess() },
+          .clickable {
+            scope.launch {
+              authRepository.signIn("google.user@example.com", "Password123!")
+              onAuthSuccess()
+            }
+          },
         contentAlignment = Alignment.Center
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -526,7 +588,12 @@ fun AuthScreen(
           .clip(RoundedCornerShape(16.dp))
           .background(Color.White)
           .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(16.dp))
-          .clickable { onAuthSuccess() },
+          .clickable {
+            scope.launch {
+              authRepository.signIn("apple.user@example.com", "Password123!")
+              onAuthSuccess()
+            }
+          },
         contentAlignment = Alignment.Center
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

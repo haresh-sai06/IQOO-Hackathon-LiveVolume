@@ -56,6 +56,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.repository.AuthRepository
 import com.example.model.DataRepository
 import com.example.ui.components.LiveVolumeAvatar
 import com.example.ui.theme.LiveError
@@ -71,6 +74,10 @@ fun SettingsScreen(
   onLogOut: () -> Unit,
   modifier: Modifier = Modifier
 ) {
+  val context = LocalContext.current
+  val authRepository = remember { AuthRepository.getInstance(context) }
+  val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
+
   var optimizeMobileData by remember { mutableStateOf(false) }
   var videoQuality by remember { mutableStateOf("Auto (1080p HD)") }
   var spatialQuality by remember { mutableStateOf("High Volumetric Depth") }
@@ -109,9 +116,13 @@ fun SettingsScreen(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.weight(1f)
       ) {
+        val profileName = currentUser?.name ?: DataRepository.myProfile.name
+        val profileEmail = currentUser?.email?.ifBlank { "sarah.chen@example.com" } ?: "sarah.chen@example.com"
+        val profileInitials = (currentUser?.name?.take(2)?.uppercase()) ?: DataRepository.myProfile.initials
+
         LiveVolumeAvatar(
-          avatarUrl = DataRepository.myProfile.avatarUrl,
-          initials = DataRepository.myProfile.initials,
+          avatarUrl = currentUser?.avatarUrl ?: DataRepository.myProfile.avatarUrl,
+          initials = profileInitials,
           size = 56.dp,
           showOnlineBadge = true,
           isOnline = true
@@ -122,7 +133,7 @@ fun SettingsScreen(
         Column {
           Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-              text = DataRepository.myProfile.name,
+              text = profileName,
               style = MaterialTheme.typography.titleMedium,
               fontWeight = FontWeight.Bold,
               color = MaterialTheme.colorScheme.onSurface
@@ -139,7 +150,7 @@ fun SettingsScreen(
           Spacer(modifier = Modifier.height(2.dp))
 
           Text(
-            text = "sarah.chen@example.com",
+            text = profileEmail,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
@@ -297,7 +308,10 @@ fun SettingsScreen(
 
     // Log Out Button
     Button(
-      onClick = onLogOut,
+      onClick = {
+        authRepository.signOut()
+        onLogOut()
+      },
       modifier = Modifier
         .fillMaxWidth()
         .height(50.dp)

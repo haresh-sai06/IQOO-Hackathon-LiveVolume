@@ -29,6 +29,26 @@ import com.example.ui.screens.RecentsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.WelcomeScreen
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.repository.CallSignalingRepository
+import com.example.ui.theme.LiveError
+import com.example.ui.theme.LivePrimaryContainer
+
 sealed class Screen(val route: String) {
   data object Welcome : Screen("welcome")
   data object Auth : Screen("auth")
@@ -45,11 +65,15 @@ sealed class Screen(val route: String) {
 @Composable
 fun LiveVolumeApp() {
   val navController = rememberNavController()
+  val context = LocalContext.current
+  val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
+  val incomingCall by signalingRepo.incomingCall.collectAsStateWithLifecycle()
 
-  NavHost(
-    navController = navController,
-    startDestination = Screen.Welcome.route
-  ) {
+  Box(modifier = Modifier.fillMaxSize()) {
+    NavHost(
+      navController = navController,
+      startDestination = Screen.Welcome.route
+    ) {
     composable(Screen.Welcome.route) {
       WelcomeScreen(
         onGetStarted = {
@@ -173,6 +197,40 @@ fun LiveVolumeApp() {
       )
     }
   }
+
+  // Incoming Real-time 3D Call Notification Dialog
+  incomingCall?.let { call ->
+    AlertDialog(
+      onDismissRequest = { signalingRepo.dismissIncomingCall() },
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.ViewInAr, contentDescription = null, tint = LivePrimaryContainer)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Incoming 3D Spatial Call", fontWeight = FontWeight.Bold)
+        }
+      },
+      text = {
+        Text("${call.callerName} is calling you with live volumetric depth and spatial audio.")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            signalingRepo.dismissIncomingCall()
+            navController.navigate(Screen.Call.createRoute(call.callerName))
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = LivePrimaryContainer)
+        ) {
+          Text("Answer (3D)", fontWeight = FontWeight.Bold)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { signalingRepo.dismissIncomingCall() }) {
+          Text("Decline", color = LiveError)
+        }
+      }
+    )
+  }
+}
 }
 
 @Composable

@@ -23,24 +23,37 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterTiltShift
 import androidx.compose.material.icons.filled.FlipCameraIos
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.example.model.VolumetricMeshMode
+import com.example.ui.components.SpatialAudioVisualizer
+import com.example.ui.components.VolumetricVisualizer
+import com.example.util.DeviceSensorManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,12 +98,32 @@ fun CallScreen(
 
   val context = LocalContext.current
   val callHistoryRepository = remember { CallHistoryRepository.getInstance(context) }
+  val sensorManager = remember { DeviceSensorManager(context) }
 
   var showGestureHint by remember { mutableStateOf(true) }
 
   // 3D rotation angles
   var rotX by remember { mutableFloatStateOf(0f) }
   var rotY by remember { mutableFloatStateOf(0f) }
+
+  val sensorPitch by sensorManager.pitch.collectAsStateWithLifecycle()
+  val sensorRoll by sensorManager.roll.collectAsStateWithLifecycle()
+
+  DisposableEffect(uiState.isGyroTrackingEnabled, uiState.is3DMode) {
+    if (uiState.isGyroTrackingEnabled && uiState.is3DMode) {
+      sensorManager.startTracking()
+    }
+    onDispose {
+      sensorManager.stopTracking()
+    }
+  }
+
+  LaunchedEffect(sensorPitch, sensorRoll, uiState.isGyroTrackingEnabled, uiState.is3DMode) {
+    if (uiState.isGyroTrackingEnabled && uiState.is3DMode) {
+      rotX = (rotX * 0.35f + sensorPitch * 0.65f).coerceIn(-12f, 12f)
+      rotY = (rotY * 0.35f + sensorRoll * 0.65f).coerceIn(-18f, 18f)
+    }
+  }
 
   val animRotX by animateFloatAsState(
     targetValue = if (uiState.is3DMode) rotX else 0f,
@@ -102,6 +135,10 @@ fun CallScreen(
     animationSpec = spring(stiffness = 600f),
     label = "rotY"
   )
+
+  LaunchedEffect(animRotX, animRotY) {
+    viewModel.updateOrientation(animRotX, animRotY)
+  }
 
   LaunchedEffect(callerName) {
     viewModel.initializeCall(callerName)
@@ -146,6 +183,18 @@ fun CallScreen(
         contentScale = ContentScale.Crop,
         modifier = Modifier.fillMaxSize()
       )
+
+      // 3D Volumetric Surface (Holographic Mesh, Point Cloud, Depth Contours)
+      if (uiState.is3DMode) {
+        VolumetricVisualizer(
+          rotationX = animRotX,
+          rotationY = animRotY,
+          meshMode = uiState.meshMode,
+          depthIntensity = uiState.depthIntensity,
+          audioLevel = uiState.audioLevel,
+          modifier = Modifier.fillMaxSize()
+        )
+      }
 
       // Light ambient scrim for clean contrast
       Box(
@@ -412,82 +461,192 @@ fun CallScreen(
         .align(Alignment.BottomCenter),
       horizontalAlignment = Alignment.CenterHorizontally
     ) {
-      // Binaural Audio Spatialization active badge
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-          .clip(RoundedCornerShape(99.dp))
-          .background(Color.White.copy(alpha = 0.92f))
-          .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(99.dp))
-          .padding(horizontal = 12.dp, vertical = 4.dp)
-      ) {
-        Icon(
-          imageVector = Icons.Default.GraphicEq,
-          contentDescription = null,
-          tint = LiveSuccess,
-          modifier = Modifier.size(14.dp)
-        )
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(
-          text = "HRTF Spatial Audio • 48 kHz",
-          style = MaterialTheme.typography.labelSmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          fontSize = 10.sp,
-          fontWeight = FontWeight.SemiBold
-        )
+      // Dynamic Binaural Spatial Audio HUD
+      SpatialAudioVisualizer(
+        azimuthDegrees = uiState.azimuth,
+        audioLevel = uiState.audioLevel,
+        modifier = Modifier.padding(horizontal = 16.dp)
+      )
+
+      Spacer(modifier = Modifier.height(6.dp))
+
+      // 3D Optics & Volumetric Options Card
+      if (uiState.is3DMode) {
+        AnimatedVisibility(visible = uiState.showOpticsSheet) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 6.dp)
+              .clip(RoundedCornerShape(20.dp))
+              .background(Color.White.copy(alpha = 0.96f))
+              .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(20.dp))
+              .padding(12.dp)
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                text = "3D Volumetric Engine",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+              )
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                  .clip(RoundedCornerShape(99.dp))
+                  .background(if (uiState.isGyroTrackingEnabled) LivePrimaryContainer.copy(alpha = 0.12f) else Color(0xFFF1F5F9))
+                  .clickable { viewModel.toggleGyroTracking() }
+                  .padding(horizontal = 8.dp, vertical = 4.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Default.ScreenRotation,
+                  contentDescription = "Gyro",
+                  tint = if (uiState.isGyroTrackingEnabled) LivePrimaryContainer else Color.Gray,
+                  modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                  text = if (uiState.isGyroTrackingEnabled) "Gyro Active" else "Gyro Off",
+                  style = MaterialTheme.typography.labelSmall,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (uiState.isGyroTrackingEnabled) LivePrimaryContainer else Color.Gray
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Mesh Mode Selector
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+              VolumetricMeshMode.entries.forEach { mode ->
+                FilterChip(
+                  selected = uiState.meshMode == mode,
+                  onClick = { viewModel.setMeshMode(mode) },
+                  label = { Text(mode.label, fontSize = 10.sp) },
+                  colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = LivePrimaryContainer,
+                    selectedLabelColor = Color.White
+                  )
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Depth Extrusion Intensity Slider
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text(
+                text = "Extrusion: ${String.format(java.util.Locale.US, "%.1fx", uiState.depthIntensity)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Slider(
+                value = uiState.depthIntensity,
+                onValueChange = { viewModel.setDepthIntensity(it) },
+                valueRange = 0.5f..2.2f,
+                modifier = Modifier.width(170.dp),
+                colors = SliderDefaults.colors(thumbColor = LivePrimaryContainer, activeTrackColor = LivePrimaryContainer)
+              )
+            }
+          }
+        }
       }
 
-      Spacer(modifier = Modifier.height(8.dp))
-
-      // 2D / 3D Mode Pill Switch
-      Box(
-        modifier = Modifier
-          .shadow(6.dp, RoundedCornerShape(99.dp), spotColor = Color.Black.copy(alpha = 0.08f))
-          .clip(RoundedCornerShape(99.dp))
-          .background(Color.White.copy(alpha = 0.95f))
-          .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(99.dp))
-          .padding(4.dp)
+      // Mode switch + 3D Optics HUD row
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(99.dp))
-              .background(if (!uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
-              .clickable {
-                if (uiState.is3DMode) viewModel.toggle3DMode()
-              }
-              .padding(horizontal = 16.dp, vertical = 6.dp)
-          ) {
-            Text(
-              text = "2D",
-              style = MaterialTheme.typography.labelSmall,
-              fontWeight = if (!uiState.is3DMode) FontWeight.Bold else FontWeight.Medium,
-              color = if (!uiState.is3DMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-          }
+        // 2D / 3D Mode Pill Switch
+        Box(
+          modifier = Modifier
+            .shadow(6.dp, RoundedCornerShape(99.dp), spotColor = Color.Black.copy(alpha = 0.08f))
+            .clip(RoundedCornerShape(99.dp))
+            .background(Color.White.copy(alpha = 0.95f))
+            .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(99.dp))
+            .padding(4.dp)
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(99.dp))
+                .background(if (!uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
+                .clickable {
+                  if (uiState.is3DMode) viewModel.toggle3DMode()
+                }
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+              Text(
+                text = "2D",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (!uiState.is3DMode) FontWeight.Bold else FontWeight.Medium,
+                color = if (!uiState.is3DMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
 
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(99.dp))
+                .background(if (uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
+                .clickable {
+                  if (!uiState.is3DMode) viewModel.toggle3DMode()
+                }
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                  imageVector = Icons.Default.Layers,
+                  contentDescription = null,
+                  tint = if (uiState.is3DMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                  modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                  text = "3D Live",
+                  style = MaterialTheme.typography.labelSmall,
+                  fontWeight = if (uiState.is3DMode) FontWeight.Bold else FontWeight.Medium,
+                  color = if (uiState.is3DMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            }
+          }
+        }
+
+        // 3D Optics Toggle Button
+        if (uiState.is3DMode) {
           Box(
             modifier = Modifier
+              .shadow(6.dp, RoundedCornerShape(99.dp), spotColor = Color.Black.copy(alpha = 0.08f))
               .clip(RoundedCornerShape(99.dp))
-              .background(if (uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
-              .clickable {
-                if (!uiState.is3DMode) viewModel.toggle3DMode()
-              }
-              .padding(horizontal = 16.dp, vertical = 6.dp)
+              .background(if (uiState.showOpticsSheet) LivePrimaryContainer else Color.White.copy(alpha = 0.95f))
+              .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(99.dp))
+              .clickable { viewModel.toggleOpticsSheet() }
+              .padding(horizontal = 14.dp, vertical = 8.dp)
           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
               Icon(
-                imageVector = Icons.Default.Layers,
-                contentDescription = null,
-                tint = if (uiState.is3DMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(15.dp)
+                imageVector = Icons.Default.Tune,
+                contentDescription = "3D Optics",
+                tint = if (uiState.showOpticsSheet) Color.White else LivePrimaryContainer,
+                modifier = Modifier.size(16.dp)
               )
               Spacer(modifier = Modifier.width(4.dp))
               Text(
-                text = "3D Live",
+                text = "Optics",
                 style = MaterialTheme.typography.labelSmall,
-                fontWeight = if (uiState.is3DMode) FontWeight.Bold else FontWeight.Medium,
-                color = if (uiState.is3DMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                fontWeight = FontWeight.Bold,
+                color = if (uiState.showOpticsSheet) Color.White else LivePrimaryContainer
               )
             }
           }
