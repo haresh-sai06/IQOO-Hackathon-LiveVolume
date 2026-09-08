@@ -1,6 +1,13 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.SystemClock
 import android.view.SurfaceView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -26,16 +33,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FlipCameraIos
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -46,9 +59,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.CallHistoryRepository
@@ -64,6 +79,11 @@ import com.example.util.HapticsManager
 import com.example.util.InAppNotificationManager
 import com.example.util.InAppNotificationType
 import com.example.viewmodel.CallViewModel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Modern, beautifully spaced clean video call interface powered by Agora Video RTC.
@@ -85,39 +105,92 @@ fun CallScreen(
   val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
   val activeSession by signalingRepo.activeSession.collectAsStateWithLifecycle()
 
-  var localSurfaceView by remember { androidx.compose.runtime.mutableStateOf<SurfaceView?>(null) }
+  // Graceful camera & mic runtime permission handling (Phase 8)
+  var hasCameraPermission by remember {
+    mutableStateOf(
+      ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    )
+  }
+  var hasMicPermission by remember {
+    mutableStateOf(
+      ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    )
+  }
+
+  val permissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions()
+  ) { perms ->
+    hasCameraPermission = perms[Manifest.permission.CAMERA] ?: hasCameraPermission
+    hasMicPermission = perms[Manifest.permission.RECORD_AUDIO] ?: hasMicPermission
+  }
+
+  LaunchedEffect(Unit) {
+    if (!hasCameraPermission || !hasMicPermission) {
+      permissionLauncher.launch(
+        arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+      )
+    }
+  }
+
+  var localSurfaceView by remember { mutableStateOf<SurfaceView?>(null) }
   val depthEstimator = remember { com.example.ml.DepthEstimator(context) }
 
-  androidx.compose.runtime.DisposableEffect(Unit) {
+  DisposableEffect(Unit) {
     onDispose {
       depthEstimator.close()
     }
   }
 
-  // Local depth capture and 3D Point Cloud streaming to remote peer (Phase 6)
-  LaunchedEffect(localSurfaceView, uiState.isCameraOn) {
+  // Local depth capture and 3D Point Cloud streaming to remote peer (Phase 6 & 8)
+  // Dynamic latency clamping: throttles capture if inference exceeds 100ms to keep UI thread silky smooth
+  LaunchedEffect(localSurfaceView, uiState.isCameraOn, hasCameraPermission) {
     val surface = localSurfaceView ?: return@LaunchedEffect
-    if (!uiState.isCameraOn) return@LaunchedEffect
+    if (!uiState.isCameraOn || !hasCameraPermission) return@LaunchedEffect
 
     val bmp = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
-    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    val bgThread = HandlerThread("PixelCopyBgThread").apply { start() }
+    val bgHandler = Handler(bgThread.looper)
+    var lastInferenceDurationMs = 0L
 
-    while (true) {
-      kotlinx.coroutines.delay(200) // 5 FPS capture & streaming
-      try {
-        if (surface.holder.surface.isValid) {
-          android.view.PixelCopy.request(surface, bmp, { copyResult ->
-            if (copyResult == android.view.PixelCopy.SUCCESS) {
-              val result = depthEstimator.estimateDepth(bmp)
-              result?.pointCloud?.let { pc ->
-                viewModel.sendLocalPointCloud(pc)
-              }
-            }
-          }, handler)
+    try {
+      while (isActive) {
+        val baseDelay = 200L // 5 FPS nominal
+        val dynamicDelay = if (lastInferenceDurationMs > 100L) {
+          (lastInferenceDurationMs * 2L).coerceAtMost(1000L)
+        } else {
+          baseDelay
         }
-      } catch (e: Exception) {
-        // safety
+        kotlinx.coroutines.delay(dynamicDelay)
+
+        if (surface.holder.surface.isValid) {
+          val copySignal = CompletableDeferred<Int>()
+          android.view.PixelCopy.request(surface, bmp, { copyResult ->
+            copySignal.complete(copyResult)
+          }, bgHandler)
+
+          val copyResult = try {
+            withTimeoutOrNull(200L) {
+              copySignal.await()
+            } ?: -1
+          } catch (e: Exception) {
+            -1
+          }
+
+          if (copyResult == android.view.PixelCopy.SUCCESS) {
+            val startTime = SystemClock.elapsedRealtime()
+            val result = withContext(Dispatchers.Default) {
+              depthEstimator.estimateDepth(bmp)
+            }
+            lastInferenceDurationMs = SystemClock.elapsedRealtime() - startTime
+
+            result?.pointCloud?.let { pc ->
+              viewModel.sendLocalPointCloud(pc)
+            }
+          }
+        }
       }
+    } finally {
+      bgThread.quitSafely()
     }
   }
 
@@ -167,7 +240,7 @@ fun CallScreen(
             modifier = Modifier.fillMaxSize()
           )
 
-          // 3D Volumetric Status Badge
+          // 3D Status Badge (Phase 7 - clean, no jargon)
           Box(
             modifier = Modifier
               .align(Alignment.BottomCenter)
@@ -179,9 +252,9 @@ fun CallScreen(
           ) {
             Text(
               text = if (uiState.remotePointCloud != null)
-                "Live 3D Volumetric Stream • Drag to orbit"
+                "Live 3D View • Drag to orbit"
               else
-                "Waiting for $callerName's 3D volumetric stream...",
+                "Connecting 3D stream...",
               color = Color.White.copy(alpha = 0.9f),
               fontSize = 12.sp,
               fontWeight = FontWeight.Medium
@@ -412,7 +485,7 @@ fun CallScreen(
       }
     }
 
-    // 2D Video vs 3D Hologram Volumetric Toggle (Phase 6)
+    // 2D vs 3D Pill-Toggle (Phase 7 - two-state pill, single accent color, zero jargon)
     Row(
       modifier = Modifier
         .align(Alignment.TopCenter)
@@ -420,8 +493,8 @@ fun CallScreen(
         .padding(top = 74.dp)
         .shadow(8.dp, RoundedCornerShape(99.dp))
         .clip(RoundedCornerShape(99.dp))
-        .background(Color.Black.copy(alpha = 0.7f))
-        .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(99.dp))
+        .background(Color.Black.copy(alpha = 0.75f))
+        .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(99.dp))
         .padding(3.dp),
       horizontalArrangement = Arrangement.Center
     ) {
@@ -429,14 +502,17 @@ fun CallScreen(
         modifier = Modifier
           .clip(RoundedCornerShape(99.dp))
           .background(if (!uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
-          .clickable { viewModel.set3DMode(false) }
-          .padding(horizontal = 14.dp, vertical = 6.dp),
+          .clickable {
+            HapticsManager.trigger(context, HapticType.SELECTION)
+            viewModel.set3DMode(false)
+          }
+          .padding(horizontal = 22.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
       ) {
         Text(
-          text = "2D Video",
-          color = if (!uiState.is3DMode) Color.White else Color.White.copy(alpha = 0.65f),
-          fontSize = 12.sp,
+          text = "2D",
+          color = if (!uiState.is3DMode) Color.White else Color.White.copy(alpha = 0.7f),
+          fontSize = 13.sp,
           fontWeight = FontWeight.Bold
         )
       }
@@ -445,14 +521,17 @@ fun CallScreen(
         modifier = Modifier
           .clip(RoundedCornerShape(99.dp))
           .background(if (uiState.is3DMode) LivePrimaryContainer else Color.Transparent)
-          .clickable { viewModel.set3DMode(true) }
-          .padding(horizontal = 14.dp, vertical = 6.dp),
+          .clickable {
+            HapticsManager.trigger(context, HapticType.SELECTION)
+            viewModel.set3DMode(true)
+          }
+          .padding(horizontal = 22.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
       ) {
         Text(
-          text = "3D Hologram",
-          color = if (uiState.is3DMode) Color.White else Color.White.copy(alpha = 0.65f),
-          fontSize = 12.sp,
+          text = "3D",
+          color = if (uiState.is3DMode) Color.White else Color.White.copy(alpha = 0.7f),
+          fontSize = 13.sp,
           fontWeight = FontWeight.Bold
         )
       }
@@ -496,5 +575,92 @@ fun CallScreen(
         }
       )
     }
+
+    // 4. Graceful Permission Denial Card (Phase 8 Hardening)
+    if (!hasCameraPermission || !hasMicPermission) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(Color.Black.copy(alpha = 0.90f))
+          .padding(24.dp),
+        contentAlignment = Alignment.Center
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xFF1E293B))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(24.dp))
+            .padding(24.dp),
+          horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+          Box(
+            modifier = Modifier
+              .size(56.dp)
+              .clip(CircleShape)
+              .background(LivePrimaryContainer.copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.CameraAlt,
+              contentDescription = null,
+              tint = LivePrimaryContainer,
+              modifier = Modifier.size(28.dp)
+            )
+          }
+
+          Spacer(modifier = Modifier.height(16.dp))
+
+          Text(
+            text = "Permissions Required",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+          )
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Text(
+            text = "LiveVolume requires camera and microphone access to stream live video and 3D volumetric reconstructions.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.75f),
+            textAlign = TextAlign.Center
+          )
+
+          Spacer(modifier = Modifier.height(20.dp))
+
+          Button(
+            onClick = {
+              permissionLauncher.launch(
+                arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+              )
+            },
+            colors = ButtonDefaults.buttonColors(
+              containerColor = LivePrimaryContainer
+            ),
+            shape = RoundedCornerShape(99.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text("Grant Permissions", fontWeight = FontWeight.SemiBold, color = Color.White)
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          OutlinedButton(
+            onClick = {
+              HapticsManager.trigger(context, HapticType.CALL_END)
+              signalingRepo.endCall()
+              viewModel.endCall(callHistoryRepository)
+              onEndCall()
+            },
+            shape = RoundedCornerShape(99.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text("Leave Call", color = Color.White.copy(alpha = 0.8f))
+          }
+        }
+      }
+    }
   }
 }
+

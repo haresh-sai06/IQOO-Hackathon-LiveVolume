@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Button
@@ -244,6 +245,61 @@ fun SettingsScreen(
         Switch(
           checked = optimizeMobileData,
           onCheckedChange = { optimizeMobileData = it },
+          colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = LivePrimaryContainer)
+        )
+      }
+
+      var performanceFallback by remember { mutableStateOf(com.example.ml.DepthEstimator.isPerformanceFallbackEnabled) }
+
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.weight(1f)
+        ) {
+          Box(
+            modifier = Modifier
+              .size(36.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFFF2F3FF)),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.Speed,
+              contentDescription = null,
+              tint = LivePrimaryContainer,
+              modifier = Modifier.size(20.dp)
+            )
+          }
+
+          Spacer(modifier = Modifier.width(14.dp))
+
+          Column {
+            Text(
+              text = "Performance Fallback Mode",
+              style = MaterialTheme.typography.labelLarge,
+              fontWeight = FontWeight.SemiBold,
+              color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+              text = "Caps 3D point density to prevent device thermal throttling",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+        }
+
+        Switch(
+          checked = performanceFallback,
+          onCheckedChange = {
+            performanceFallback = it
+            com.example.ml.DepthEstimator.isPerformanceFallbackEnabled = it
+          },
           colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = LivePrimaryContainer)
         )
       }

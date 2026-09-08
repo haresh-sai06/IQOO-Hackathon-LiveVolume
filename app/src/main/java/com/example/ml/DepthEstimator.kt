@@ -433,10 +433,10 @@ class DepthEstimator(private val context: Context) {
       setPixels(maskedPixelBuffer, 0, 256, 0, 0, 256, 256)
     }
 
-    // 6. Generate 3D point cloud from masked depth & camera RGB (Phase 5)
+    // 6. Generate 3D point cloud from masked depth & camera RGB (Phase 5 & 8)
     var pointCount = 0
     val focalLength = 220f
-    val stride = 2 // Downsample by 2x for optimal 5,000-12,000 point density
+    val stride = if (isPerformanceFallbackEnabled) 3 else 2 // Dynamic performance fallback
 
     for (y in 0 until 256 step stride) {
       for (x in 0 until 256 step stride) {
@@ -512,5 +512,6 @@ class DepthEstimator(private val context: Context) {
 
   companion object {
     private const val TAG = "DepthEstimator"
+    var isPerformanceFallbackEnabled: Boolean = false
   }
 }
