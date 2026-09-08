@@ -168,7 +168,7 @@ fun RecentsScreen(
       )
 
       IconButton(
-        onClick = { onStartCall("Sarah Chen") },
+        onClick = { onStartCall(effectiveCallRecords.firstOrNull()?.contactName ?: "Live Contact") },
         modifier = Modifier
           .size(40.dp)
           .clip(CircleShape)
@@ -416,7 +416,7 @@ fun RecentsScreen(
 
               // Quick Connect Button
               Button(
-                onClick = { onStartCall("Sarah Chen") },
+                onClick = { onStartCall(effectiveCallRecords.firstOrNull()?.contactName ?: "Live Contact") },
                 modifier = Modifier
                   .height(38.dp)
                   .testTag("start_spatial_call_button"),

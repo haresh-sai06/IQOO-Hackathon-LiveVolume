@@ -1,5 +1,12 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.provider.ContactsContract
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,18 +30,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,29 +64,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.data.repository.RealtimeContactsRepository
 import com.example.data.repository.AuthRepository
+import com.example.data.repository.RealtimeContactsRepository
 import com.example.model.Contact
-import com.example.model.DataRepository
 import com.example.ui.components.LiveVolumeAvatar
 import com.example.ui.theme.LivePrimaryContainer
 import com.example.ui.theme.ThemeManager
 import com.example.util.HapticType
 import com.example.util.HapticsManager
-
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.provider.ContactsContract
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -310,7 +307,7 @@ fun ContactsScreen(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 20.dp, vertical = 16.dp),
+        .padding(horizontal = 20.dp, vertical = 14.dp),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
@@ -322,7 +319,7 @@ fun ContactsScreen(
           color = MaterialTheme.colorScheme.onSurface
         )
         Text(
-          text = "${allContacts.size} people • ${allContacts.count { it.isSpatialReady }} ready for 3D live spatial audio",
+          text = "${allContacts.size} people • ${allContacts.count { it.isSpatialReady }} ready for 3D spatial calls",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -339,7 +336,7 @@ fun ContactsScreen(
             checkAndImportContacts()
           },
           modifier = Modifier
-            .size(40.dp)
+            .size(38.dp)
             .clip(CircleShape)
             .background(Color(0xFFF2F3FF))
             .testTag("import_contacts_button")
@@ -348,7 +345,7 @@ fun ContactsScreen(
             imageVector = Icons.Default.PhoneAndroid,
             contentDescription = "Import from Phone",
             tint = LivePrimaryContainer,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(19.dp)
           )
         }
 
@@ -359,7 +356,7 @@ fun ContactsScreen(
             showAddDialog = true
           },
           modifier = Modifier
-            .size(40.dp)
+            .size(38.dp)
             .clip(CircleShape)
             .background(Color(0xFFF2F3FF))
             .testTag("add_contact_button")
@@ -368,48 +365,11 @@ fun ContactsScreen(
             imageVector = Icons.Default.Add,
             contentDescription = "Add Contact",
             tint = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(20.dp)
           )
         }
       }
     }
-
-    // Quick sync phone contacts helper banner
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(horizontal = 20.dp, vertical = 4.dp)
-        .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFFF2F3FF))
-        .clickable { checkAndImportContacts() }
-        .padding(horizontal = 12.dp, vertical = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-          imageVector = Icons.Default.PhoneAndroid,
-          contentDescription = null,
-          tint = activePrimary,
-          modifier = Modifier.size(18.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-          text = if (isImporting) "Reading device contacts..." else "Import contacts from phone",
-          style = MaterialTheme.typography.labelMedium,
-          fontWeight = FontWeight.SemiBold,
-          color = MaterialTheme.colorScheme.onSurface
-        )
-      }
-      Icon(
-        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-        contentDescription = null,
-        tint = activePrimary,
-        modifier = Modifier.size(14.dp)
-      )
-    }
-
-    Spacer(modifier = Modifier.height(6.dp))
 
     // Search Bar
     OutlinedTextField(
@@ -438,7 +398,7 @@ fun ContactsScreen(
         .fillMaxWidth()
         .padding(horizontal = 20.dp)
         .testTag("contacts_search_input"),
-      shape = RoundedCornerShape(16.dp),
+      shape = RoundedCornerShape(14.dp),
       colors = OutlinedTextFieldDefaults.colors(
         focusedContainerColor = Color.White,
         unfocusedContainerColor = Color.White,
@@ -448,7 +408,7 @@ fun ContactsScreen(
       singleLine = true
     )
 
-    Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(10.dp))
 
     // Filter Chips
     LazyRow(
@@ -488,116 +448,91 @@ fun ContactsScreen(
       }
     }
 
-    Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(10.dp))
 
     // Main Directory List with Alphabet Fast-Scroll Rail
     Row(
       modifier = Modifier
         .fillMaxWidth()
         .weight(1f)
-        .padding(start = 20.dp, end = 6.dp)
+        .padding(start = 20.dp, end = if (searchQuery.isEmpty()) 4.dp else 20.dp)
     ) {
       LazyColumn(
         modifier = Modifier
           .weight(1f)
-          .padding(end = 10.dp)
+          .padding(end = if (searchQuery.isEmpty()) 6.dp else 0.dp)
       ) {
-        // My Card Section
-        item {
-          Text(
-            text = "MY CARD",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.outline,
-            letterSpacing = 1.sp,
-            modifier = Modifier.padding(vertical = 8.dp)
-          )
+        // My Card Section (Compact & Breathable)
+        if (searchQuery.isEmpty() && selectedFilter == "All") {
+          item {
+            val profileName = currentUser?.name?.ifBlank { "My Profile" } ?: "My Profile"
+            val profileSubtitle = currentUser?.phone?.ifBlank { currentUser?.email } ?: currentUser?.email ?: "Tap to view profile"
+            val profileInitials = profileName.split(" ")
+              .filter { it.isNotEmpty() }
+              .take(2)
+              .map { it.first().uppercase() }
+              .joinToString("")
+              .ifEmpty { "ME" }
 
-          val profileName = currentUser?.name?.ifBlank { "My Profile" } ?: "My Profile"
-          val profileSubtitle = currentUser?.phone?.ifBlank { currentUser?.email } ?: currentUser?.email ?: "Tap to setup profile"
-          val profileInitials = profileName.split(" ").filter { it.isNotEmpty() }.take(2).map { it.first().uppercase() }.joinToString("").ifEmpty { "ME" }
-
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(18.dp))
-              .background(Color.White)
-              .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(18.dp))
-              .clickable {
-                HapticsManager.trigger(context, HapticType.SELECTION)
-                onOpenProfile()
-              }
-              .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-          ) {
             Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier.weight(1f)
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White)
+                .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(16.dp))
+                .clickable {
+                  HapticsManager.trigger(context, HapticType.SELECTION)
+                  onOpenProfile()
+                }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+              verticalAlignment = Alignment.CenterVertically
             ) {
               LiveVolumeAvatar(
                 avatarUrl = currentUser?.avatarUrl,
                 initials = profileInitials,
-                size = 50.dp,
+                size = 46.dp,
                 showOnlineBadge = true,
                 isOnline = true
               )
               Spacer(modifier = Modifier.width(14.dp))
-              Column {
+              Column(modifier = Modifier.weight(1f)) {
                 Text(
                   text = profileName,
-                  style = MaterialTheme.typography.titleMedium,
+                  style = MaterialTheme.typography.titleSmall,
                   fontWeight = FontWeight.Bold,
                   color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                   text = "$profileSubtitle • ${currentUser?.status ?: "3D Live Ready"}",
                   style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
-            }
-
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(99.dp))
-                .background(Color(0xFFEAEDFF))
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                  imageVector = Icons.Default.Person,
-                  contentDescription = null,
-                  tint = activePrimary,
-                  modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                  text = "EDIT",
-                  style = MaterialTheme.typography.labelSmall,
-                  color = activePrimary,
-                  fontWeight = FontWeight.Bold
-                )
-              }
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = "Edit Profile",
+                tint = activePrimary,
+                modifier = Modifier.size(16.dp)
+              )
             }
           }
-
-          Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Pinned Favorites Quick Connect Section
-        item {
-          Text(
-            text = "PINNED FAVORITES",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.outline,
-            letterSpacing = 1.sp,
-            modifier = Modifier.padding(bottom = 10.dp)
-          )
+        // Pinned Favorites Quick Connect Section (ONLY show when favorites actually exist)
+        if (favoriteContacts.isNotEmpty() && searchQuery.isEmpty()) {
+          item {
+            Text(
+              text = "PINNED FAVORITES",
+              style = MaterialTheme.typography.labelSmall,
+              fontWeight = FontWeight.Bold,
+              color = MaterialTheme.colorScheme.outline,
+              letterSpacing = 1.sp,
+              modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+            )
 
-          if (favoriteContacts.isNotEmpty()) {
             LazyRow(
               horizontalArrangement = Arrangement.spacedBy(10.dp),
               modifier = Modifier.fillMaxWidth()
@@ -617,169 +552,82 @@ fun ContactsScreen(
                 )
               }
             }
-          } else {
-            Box(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.White)
-                .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(16.dp))
-                .padding(16.dp),
-              contentAlignment = Alignment.Center
-            ) {
-              Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-              ) {
-                Icon(
-                  imageVector = Icons.Default.StarBorder,
-                  contentDescription = null,
-                  tint = Color(0xFFCBD5E1),
-                  modifier = Modifier.size(24.dp)
-                )
-                Text(
-                  text = "No pinned favorites",
-                  style = MaterialTheme.typography.labelMedium,
-                  fontWeight = FontWeight.SemiBold,
-                  color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                  text = "Tap the star icon next to any contact below to pin them here for 1-tap calling.",
-                  style = MaterialTheme.typography.bodySmall,
-                  fontSize = 11.sp,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  textAlign = TextAlign.Center
-                )
-              }
-            }
           }
-
-          Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Directory Alphabet Sections
+        // Directory Alphabet Sections - Grouped with Generous Breathing Space
         groupedContacts.forEach { (section, contacts) ->
-          item {
+          item(key = "section_header_$section") {
             Text(
               text = section,
-              style = MaterialTheme.typography.labelSmall,
+              style = MaterialTheme.typography.labelMedium,
               fontWeight = FontWeight.Bold,
               color = MaterialTheme.colorScheme.outline,
-              modifier = Modifier.padding(vertical = 8.dp)
+              modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp)
             )
-          }
 
-          items(contacts, key = { it.id }) { contact ->
-            ContactRow(
-              contact = contact,
-              activePrimary = activePrimary,
-              onCallClick = {
-                HapticsManager.trigger(context, HapticType.CALL_START)
-                onStartCall(contact.name)
-              },
-              onAudioCallClick = {
-                HapticsManager.trigger(context, HapticType.CALL_START)
-                onStartCall(contact.name)
-              },
-              onToggleFavorite = {
-                HapticsManager.trigger(context, HapticType.FAVORITE_PIN)
-                contactsRepository.toggleFavorite(contact.id)
-              }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-          }
-        }
-
-        // Tip Card: Looking for 3D Audio?
-        item {
-          Spacer(modifier = Modifier.height(12.dp))
-          Box(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(18.dp))
-              .background(Color(0xFFF2F3FF))
-              .border(1.dp, Color(0xFFDAE2FD), RoundedCornerShape(18.dp))
-              .padding(18.dp)
-          ) {
-            Column {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                  imageVector = Icons.Default.ViewInAr,
-                  contentDescription = null,
-                  tint = activePrimary,
-                  modifier = Modifier.size(20.dp)
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.White)
+                .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(18.dp))
+            ) {
+              contacts.forEachIndexed { index, contact ->
+                ContactRow(
+                  contact = contact,
+                  activePrimary = activePrimary,
+                  onCallClick = {
+                    HapticsManager.trigger(context, HapticType.CALL_START)
+                    onStartCall(contact.name)
+                  },
+                  onToggleFavorite = {
+                    HapticsManager.trigger(context, HapticType.FAVORITE_PIN)
+                    contactsRepository.toggleFavorite(contact.id)
+                  }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                  text = "Looking for 3D Audio?",
-                  style = MaterialTheme.typography.titleSmall,
-                  fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onSurface
-                )
-              }
 
-              Spacer(modifier = Modifier.height(6.dp))
-
-              Text(
-                text = "Tap the 3D box icon next to any contact to position their voice anywhere around you in real time.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-              )
-
-              Spacer(modifier = Modifier.height(12.dp))
-
-              Button(
-                onClick = {
-                  HapticsManager.trigger(context, HapticType.SELECTION)
-                },
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(44.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = activePrimary)
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                  )
-                  Spacer(modifier = Modifier.width(8.dp))
-                  Text(
-                    text = "Invite Contacts",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
+                if (index < contacts.lastIndex) {
+                  HorizontalDivider(
+                    modifier = Modifier.padding(start = 72.dp, end = 16.dp),
+                    color = Color(0xFFF1F5F9),
+                    thickness = 1.dp
                   )
                 }
               }
             }
           }
-          Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        item {
+          Spacer(modifier = Modifier.height(28.dp))
         }
       }
 
-      // Alphabet Fast-Scroll Rail
-      Column(
-        modifier = Modifier
-          .width(20.dp)
-          .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-      ) {
-        alphabet.forEach { char ->
-          val isPresent = lettersPresent.contains(char)
-          Text(
-            text = char,
-            fontSize = 9.sp,
-            fontWeight = if (isPresent) FontWeight.Bold else FontWeight.Normal,
-            color = if (isPresent) activePrimary else Color(0xFFCBD5E1),
-            modifier = Modifier
-              .clickable {
-                HapticsManager.trigger(context, HapticType.SELECTION)
-                searchQuery = if (char == "#") "" else char
-              }
-              .padding(vertical = 1.dp)
-          )
+      // Alphabet Fast-Scroll Rail (Slim, subtle, non-intrusive)
+      if (searchQuery.isEmpty()) {
+        Column(
+          modifier = Modifier
+            .width(14.dp)
+            .padding(vertical = 4.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+          alphabet.forEach { char ->
+            val isPresent = lettersPresent.contains(char)
+            Text(
+              text = char,
+              fontSize = 9.sp,
+              fontWeight = if (isPresent) FontWeight.Bold else FontWeight.Normal,
+              color = if (isPresent) activePrimary else Color(0xFFCBD5E1),
+              modifier = Modifier
+                .clickable {
+                  HapticsManager.trigger(context, HapticType.SELECTION)
+                  searchQuery = if (char == "#") "" else char
+                }
+                .padding(vertical = 1.dp)
+            )
+          }
         }
       }
     }
@@ -795,11 +643,11 @@ private fun QuickConnectCard(
 ) {
   Box(
     modifier = Modifier
-      .width(112.dp)
+      .width(116.dp)
       .clip(RoundedCornerShape(16.dp))
       .background(Color.White)
       .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(16.dp))
-      .padding(vertical = 10.dp, horizontal = 8.dp),
+      .padding(vertical = 12.dp, horizontal = 10.dp),
     contentAlignment = Alignment.Center
   ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -820,7 +668,8 @@ private fun QuickConnectCard(
         style = MaterialTheme.typography.labelMedium,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurface,
-        maxLines = 1
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
       )
 
       Text(
@@ -834,7 +683,7 @@ private fun QuickConnectCard(
 
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
       ) {
         // Quick 1-tap call
         Box(
@@ -856,7 +705,7 @@ private fun QuickConnectCard(
               tint = if (contact.isSpatialReady) Color.White else MaterialTheme.colorScheme.onSurface,
               modifier = Modifier.size(13.dp)
             )
-            Spacer(modifier = Modifier.width(3.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
               text = "Call",
               fontSize = 10.sp,
@@ -888,127 +737,103 @@ private fun ContactRow(
   contact: Contact,
   activePrimary: Color,
   onCallClick: () -> Unit,
-  onAudioCallClick: () -> Unit,
   onToggleFavorite: () -> Unit
 ) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(16.dp))
-      .background(Color.White)
-      .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(16.dp))
-      .padding(horizontal = 12.dp, vertical = 10.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.SpaceBetween
+      .clickable { onCallClick() }
+      .padding(horizontal = 16.dp, vertical = 12.dp),
+    verticalAlignment = Alignment.CenterVertically
   ) {
-    // Left: Avatar + Name + Subtitle + 3D Pill
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      modifier = Modifier
-        .weight(1f)
-        .clickable { onCallClick() }
+    // Left: Avatar with Status
+    LiveVolumeAvatar(
+      avatarUrl = contact.avatarUrl,
+      initials = contact.initials,
+      size = 46.dp,
+      showOnlineBadge = contact.isOnline,
+      isOnline = contact.isOnline
+    )
+
+    Spacer(modifier = Modifier.width(14.dp))
+
+    // Middle: Contact Details (Takes all available width with zero compression)
+    Column(
+      modifier = Modifier.weight(1f)
     ) {
-      LiveVolumeAvatar(
-        avatarUrl = contact.avatarUrl,
-        initials = contact.initials,
-        size = 42.dp,
-        showOnlineBadge = contact.isOnline,
-        isOnline = contact.isOnline
-      )
-
-      Spacer(modifier = Modifier.width(10.dp))
-
-      Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Text(
-            text = contact.name,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
-          )
-          if (contact.isSpatialReady) {
-            Spacer(modifier = Modifier.width(6.dp))
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(99.dp))
-                .background(Color(0xFFEAEDFF))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-              Text(
-                text = "3D Ready",
-                style = MaterialTheme.typography.labelSmall,
-                color = activePrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.sp
-              )
-            }
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+      ) {
+        Text(
+          text = contact.name,
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.SemiBold,
+          color = MaterialTheme.colorScheme.onSurface,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+        if (contact.isSpatialReady) {
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(6.dp))
+              .background(Color(0xFFEAEDFF))
+              .padding(horizontal = 6.dp, vertical = 2.dp)
+          ) {
+            Text(
+              text = "3D Ready",
+              style = MaterialTheme.typography.labelSmall,
+              color = activePrimary,
+              fontWeight = FontWeight.Bold,
+              fontSize = 9.sp
+            )
           }
         }
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        Text(
-          text = contact.phone.ifEmpty { contact.status },
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          fontSize = 11.sp
-        )
       }
+
+      Spacer(modifier = Modifier.height(2.dp))
+
+      Text(
+        text = contact.phone.ifEmpty { contact.status },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 12.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
     }
 
-    // Right: Star Favorite Button + Voice Call Button + 3D Spatial Call Button
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(4.dp)
+    Spacer(modifier = Modifier.width(10.dp))
+
+    // Right Actions: Favorite Star + Single 3D/Voice Call Button (Clean & Breathable)
+    IconButton(
+      onClick = onToggleFavorite,
+      modifier = Modifier.size(36.dp)
     ) {
-      // Star Toggle Button
-      IconButton(
-        onClick = onToggleFavorite,
-        modifier = Modifier.size(34.dp)
-      ) {
-        Icon(
-          imageVector = if (contact.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-          contentDescription = if (contact.isFavorite) "Unpin" else "Pin",
-          tint = if (contact.isFavorite) Color(0xFFF59E0B) else Color(0xFFCBD5E1),
-          modifier = Modifier.size(20.dp)
-        )
-      }
+      Icon(
+        imageVector = if (contact.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+        contentDescription = if (contact.isFavorite) "Unpin" else "Pin",
+        tint = if (contact.isFavorite) Color(0xFFF59E0B) else Color(0xFFCBD5E1),
+        modifier = Modifier.size(20.dp)
+      )
+    }
 
-      // Voice Call Button
-      Box(
-        modifier = Modifier
-          .size(34.dp)
-          .clip(CircleShape)
-          .background(Color(0xFFF2F3FF))
-          .clickable { onAudioCallClick() },
-        contentAlignment = Alignment.Center
-      ) {
-        Icon(
-          imageVector = Icons.Default.Call,
-          contentDescription = "Voice Call",
-          tint = MaterialTheme.colorScheme.onSurface,
-          modifier = Modifier.size(16.dp)
-        )
-      }
+    Spacer(modifier = Modifier.width(4.dp))
 
-      // 3D Call Button (if spatial ready)
-      if (contact.isSpatialReady) {
-        Box(
-          modifier = Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(activePrimary)
-            .clickable { onCallClick() },
-          contentAlignment = Alignment.Center
-        ) {
-          Icon(
-            imageVector = Icons.Default.ViewInAr,
-            contentDescription = "3D Spatial Call",
-            tint = Color.White,
-            modifier = Modifier.size(16.dp)
-          )
-        }
-      }
+    Box(
+      modifier = Modifier
+        .size(38.dp)
+        .clip(CircleShape)
+        .background(if (contact.isSpatialReady) activePrimary else Color(0xFFF2F3FF))
+        .clickable { onCallClick() },
+      contentAlignment = Alignment.Center
+    ) {
+      Icon(
+        imageVector = if (contact.isSpatialReady) Icons.Default.ViewInAr else Icons.Default.Call,
+        contentDescription = if (contact.isSpatialReady) "3D Spatial Call" else "Call",
+        tint = if (contact.isSpatialReady) Color.White else MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.size(18.dp)
+      )
     }
   }
 }

@@ -112,6 +112,7 @@ fun ProfileScreen(
       HapticsManager.trigger(context, HapticType.SUCCESS)
       savedSuccess = true
       Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
+      onBack()
     } else {
       Toast.makeText(context, "Full name cannot be empty", Toast.LENGTH_SHORT).show()
     }

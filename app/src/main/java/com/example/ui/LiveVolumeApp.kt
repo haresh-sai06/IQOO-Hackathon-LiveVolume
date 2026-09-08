@@ -52,8 +52,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.repository.CallSignalingRepository
 import com.example.data.repository.AuthRepository
+import com.example.ui.components.InAppNotificationBanner
 import com.example.ui.theme.LiveError
 import com.example.ui.theme.LivePrimaryContainer
+import com.example.util.InAppNotificationManager
 
 sealed class Screen(val route: String) {
   data object Welcome : Screen("welcome")
@@ -78,6 +80,7 @@ fun LiveVolumeApp() {
   val incomingCall by signalingRepo.incomingCall.collectAsStateWithLifecycle()
   val authRepository = remember { AuthRepository.getInstance(context) }
   val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
+  val currentInAppNotification by InAppNotificationManager.currentNotification.collectAsStateWithLifecycle()
   val startDestination = if (currentUser != null) Screen.Main.route else Screen.Auth.route
 
   Box(
@@ -172,11 +175,11 @@ fun LiveVolumeApp() {
       arguments = listOf(
         navArgument("callerName") {
           type = NavType.StringType
-          defaultValue = "Sarah Chen"
+          defaultValue = "Live Contact"
         }
       )
     ) { backStackEntry ->
-      val rawName = backStackEntry.arguments?.getString("callerName") ?: "Sarah Chen"
+      val rawName = backStackEntry.arguments?.getString("callerName") ?: "Live Contact"
       val callerName = try {
         java.net.URLDecoder.decode(rawName, "UTF-8")
       } catch (e: Exception) {
@@ -240,6 +243,19 @@ fun LiveVolumeApp() {
       )
     }
   }
+
+  // Floating In-App Push Notification Banner (FCM / Realtime alerts)
+  InAppNotificationBanner(
+    notification = currentInAppNotification,
+    onDismiss = { InAppNotificationManager.dismiss() },
+    onNotificationClick = { notification ->
+      // If notification is about a call, could navigate directly
+      if (notification.type == com.example.util.InAppNotificationType.CALL_MISSED ||
+          notification.type == com.example.util.InAppNotificationType.CALL_INCOMING) {
+        navController.navigate(Screen.Main.route)
+      }
+    }
+  )
 
   // Incoming Real-time 3D Call Notification Dialog
   incomingCall?.let { call ->

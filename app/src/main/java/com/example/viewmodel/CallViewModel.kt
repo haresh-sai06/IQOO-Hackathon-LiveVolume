@@ -43,7 +43,7 @@ enum class ConnectionQualityLevel(
  * Complete state representation for an ongoing video/3D call.
  */
 data class CallUiState(
-  val callerName: String = "Sarah Chen",
+  val callerName: String = "Live Contact",
   val isMuted: Boolean = false,
   val isCameraOn: Boolean = true,
   val connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED,
