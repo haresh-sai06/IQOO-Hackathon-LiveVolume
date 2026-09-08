@@ -21,6 +21,11 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    val agoraAppId = project.findProperty("AGORA_APP_ID") as? String 
+        ?: System.getenv("AGORA_APP_ID") 
+        ?: "YOUR_AGORA_APP_ID"
+    buildConfigField("String", "AGORA_APP_ID", "\"$agoraAppId\"")
   }
 
   signingConfigs {
@@ -107,6 +112,7 @@ dependencies {
   implementation(libs.firebase.firestore)
   implementation(libs.firebase.auth)
   implementation(libs.firebase.messaging)
+  implementation(libs.agora.rtc)
   // implementation(libs.androidx.credentials)
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)

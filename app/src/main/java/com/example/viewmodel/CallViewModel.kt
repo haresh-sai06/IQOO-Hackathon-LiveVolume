@@ -1,12 +1,14 @@
 package com.example.viewmodel
 
+import android.app.Application
 import androidx.compose.ui.graphics.Color
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.model.VolumetricMeshMode
 import com.example.service.AudioProcessingService
 import com.example.ui.theme.LiveError
 import com.example.ui.theme.LiveSuccess
+import com.example.util.AgoraManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,11 +18,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Connection states for real-time volumetric call session.
+ * Connection states for real-time video call session.
  */
 enum class ConnectionStatus(val label: String) {
   CONNECTING("Connecting..."),
-  CONNECTED("Connected • 3D Encrypted"),
+  CONNECTED("Connected • Live Agora RTC"),
   RECONNECTING("Reconnecting..."),
   DISCONNECTED("Call Ended")
 }
@@ -40,37 +42,42 @@ enum class ConnectionQualityLevel(
 }
 
 /**
- * Complete state representation for an ongoing video/3D call.
+ * Complete state representation for an ongoing video call with Agora RTC.
  */
 data class CallUiState(
   val callerName: String = "Live Contact",
+  val channelName: String = "",
   val isMuted: Boolean = false,
   val isCameraOn: Boolean = true,
   val connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED,
   val isFrontCamera: Boolean = true,
   val isSpeakerOn: Boolean = true,
-  val is3DMode: Boolean = true,
+  val is3DMode: Boolean = false,
   val elapsedSeconds: Long = 0L,
   val cameraPermissionGranted: Boolean = false,
   val audioPermissionGranted: Boolean = false,
   val latencyMs: Int = 22,
   val connectionQuality: ConnectionQualityLevel = ConnectionQualityLevel.EXCELLENT,
   val fps: Int = 60,
+  val remoteUid: Int? = null,
+  val isRemoteVideoMuted: Boolean = false,
   val meshMode: VolumetricMeshMode = VolumetricMeshMode.HOLOGRAPHIC_MESH,
   val depthIntensity: Float = 1.0f,
-  val isGyroTrackingEnabled: Boolean = true,
+  val isGyroTrackingEnabled: Boolean = false,
   val audioLevel: Float = 0.25f,
   val azimuth: Float = 0f,
   val elevation: Float = 0f,
   val showOpticsSheet: Boolean = false
 )
 
-class CallViewModel : ViewModel() {
+class CallViewModel(application: Application) : AndroidViewModel(application) {
+
+  val agoraManager = AgoraManager.getInstance(application)
 
   private val _uiState = MutableStateFlow(CallUiState())
   val uiState: StateFlow<CallUiState> = _uiState.asStateFlow()
 
-  // Direct accessible state flows to strictly satisfy specific requirements
+  // Direct accessible state flows
   val isMuted: StateFlow<Boolean> = MutableStateFlow(false)
   val isCameraOn: StateFlow<Boolean> = MutableStateFlow(true)
   val connectionStatus: StateFlow<ConnectionStatus> = MutableStateFlow(ConnectionStatus.CONNECTED)
@@ -90,6 +97,19 @@ class CallViewModel : ViewModel() {
   init {
     startCallTimer()
     startLatencyMonitoring()
+
+    viewModelScope.launch {
+      agoraManager.remoteUid.collect { uid ->
+        _uiState.update { it.copy(remoteUid = uid) }
+      }
+    }
+
+    viewModelScope.launch {
+      agoraManager.isRemoteVideoMuted.collect { muted ->
+        _uiState.update { it.copy(isRemoteVideoMuted = muted) }
+      }
+    }
+
     viewModelScope.launch {
       AudioProcessingService.sharedAudioLevel.collect { level ->
         _uiState.update { it.copy(audioLevel = level) }
@@ -97,18 +117,24 @@ class CallViewModel : ViewModel() {
     }
   }
 
-  fun initializeCall(callerName: String) {
+  fun initializeCall(callerName: String, customChannel: String? = null) {
+    val sanitized = callerName.lowercase().replace(Regex("[^a-z0-9]"), "")
+    val channel = customChannel ?: if (sanitized.isNotBlank()) "livevolume_$sanitized" else "livevolume_room"
+
     _elapsedSeconds.value = 0L
     _elapsedDurationFormatted.value = "00:00"
     _uiState.update {
       it.copy(
         callerName = callerName,
+        channelName = channel,
         connectionStatus = ConnectionStatus.CONNECTED,
         elapsedSeconds = 0L,
         latencyMs = 24,
         connectionQuality = ConnectionQualityLevel.EXCELLENT
       )
     }
+
+    agoraManager.joinChannel(channel)
     startCallTimer()
     startLatencyMonitoring()
   }
@@ -136,7 +162,7 @@ class CallViewModel : ViewModel() {
   }
 
   /**
-   * Periodically monitors and adjusts simulated network ping with realistic micro-jitter.
+   * Periodically monitors network ping.
    */
   private fun startLatencyMonitoring() {
     latencySimJob?.cancel()
@@ -146,7 +172,6 @@ class CallViewModel : ViewModel() {
         delay(3500L)
         counter++
         if (_uiState.value.connectionStatus == ConnectionStatus.CONNECTED) {
-          // Slight realistic fluctuation between 18ms and 36ms in normal mode
           val base = 22
           val jitter = (counter % 5) * 3 - 6
           val newLatency = (base + jitter).coerceIn(16, 45)
@@ -156,35 +181,12 @@ class CallViewModel : ViewModel() {
     }
   }
 
-  /**
-   * Sets latency in milliseconds and recalculates quality level.
-   */
   fun updateLatency(latency: Int) {
     val quality = calculateQuality(latency, _uiState.value.connectionStatus)
     _uiState.update {
       it.copy(
         latencyMs = latency,
         connectionQuality = quality
-      )
-    }
-  }
-
-  /**
-   * Allows cycling through connection tiers to visually test UI reactions.
-   */
-  fun cycleConnectionQuality() {
-    val current = _uiState.value.latencyMs
-    val (nextLatency, nextStatus) = when {
-      current < 45 -> Pair(72, ConnectionStatus.CONNECTED)     // Good (Lime)
-      current < 85 -> Pair(118, ConnectionStatus.CONNECTED)    // Moderate (Amber)
-      current < 150 -> Pair(210, ConnectionStatus.CONNECTED)   // Poor (Red)
-      else -> Pair(24, ConnectionStatus.CONNECTED)             // Back to Excellent (Green)
-    }
-    _uiState.update {
-      it.copy(
-        latencyMs = nextLatency,
-        connectionStatus = nextStatus,
-        connectionQuality = calculateQuality(nextLatency, nextStatus)
       )
     }
   }
@@ -202,29 +204,41 @@ class CallViewModel : ViewModel() {
   }
 
   /**
-   * Toggles microphone mute state.
+   * Toggles microphone mute state with Agora RTC audio publication.
    */
   fun toggleMute() {
-    _uiState.update { it.copy(isMuted = !it.isMuted) }
+    val newMute = !_uiState.value.isMuted
+    _uiState.update { it.copy(isMuted = newMute) }
+    agoraManager.muteLocalAudio(newMute)
   }
 
   /**
-   * Toggles device camera on/off.
+   * Toggles device camera on/off with Agora RTC video publication.
    */
   fun toggleCamera() {
-    _uiState.update { it.copy(isCameraOn = !it.isCameraOn) }
+    val newCam = !_uiState.value.isCameraOn
+    _uiState.update { it.copy(isCameraOn = newCam) }
+    agoraManager.enableLocalVideo(newCam)
   }
 
   /**
-   * Switches between front and rear cameras.
+   * Switches between front and rear cameras via Agora RTC.
    */
   fun switchCamera() {
-    _uiState.update { it.copy(isFrontCamera = !it.isFrontCamera) }
+    val newFront = !_uiState.value.isFrontCamera
+    _uiState.update { it.copy(isFrontCamera = newFront) }
+    agoraManager.switchCamera()
   }
 
   /**
-   * Updates call connection status.
+   * Toggles audio route between speakerphone and earpiece.
    */
+  fun toggleSpeaker() {
+    val newSpeaker = !_uiState.value.isSpeakerOn
+    _uiState.update { it.copy(isSpeakerOn = newSpeaker) }
+    agoraManager.enableSpeakerphone(newSpeaker)
+  }
+
   fun setConnectionStatus(status: ConnectionStatus) {
     val quality = calculateQuality(_uiState.value.latencyMs, status)
     _uiState.update {
@@ -233,29 +247,6 @@ class CallViewModel : ViewModel() {
         connectionQuality = quality
       )
     }
-  }
-
-  /**
-   * Toggles between 3D holographic rendering and flat 2D streaming.
-   */
-  fun toggle3DMode() {
-    _uiState.update { it.copy(is3DMode = !it.is3DMode) }
-  }
-
-  fun setMeshMode(mode: VolumetricMeshMode) {
-    _uiState.update { it.copy(meshMode = mode) }
-  }
-
-  fun setDepthIntensity(intensity: Float) {
-    _uiState.update { it.copy(depthIntensity = intensity.coerceIn(0.4f, 2.5f)) }
-  }
-
-  fun toggleGyroTracking() {
-    _uiState.update { it.copy(isGyroTrackingEnabled = !it.isGyroTrackingEnabled) }
-  }
-
-  fun toggleOpticsSheet() {
-    _uiState.update { it.copy(showOpticsSheet = !it.showOpticsSheet) }
   }
 
   fun updateOrientation(rotX: Float, rotY: Float) {
@@ -271,16 +262,6 @@ class CallViewModel : ViewModel() {
     AudioProcessingService.sharedElevation.value = elevation
   }
 
-  /**
-   * Toggles audio route between speakerphone and earpiece.
-   */
-  fun toggleSpeaker() {
-    _uiState.update { it.copy(isSpeakerOn = !it.isSpeakerOn) }
-  }
-
-  /**
-   * Updates permission states.
-   */
   fun updatePermissions(cameraGranted: Boolean, audioGranted: Boolean) {
     _uiState.update {
       it.copy(
@@ -291,14 +272,15 @@ class CallViewModel : ViewModel() {
   }
 
   /**
-   * Ends the call session and optionally persists call history to Room database.
+   * Ends the call session, leaves the Agora channel, and logs call history.
    */
   fun endCall(repository: com.example.data.local.CallHistoryRepository? = null) {
     timerJob?.cancel()
     latencySimJob?.cancel()
+    agoraManager.leaveChannel()
+
     val finalSeconds = _uiState.value.elapsedSeconds
     val caller = _uiState.value.callerName
-    val isSpatial = _uiState.value.is3DMode
 
     _uiState.update {
       it.copy(
@@ -318,7 +300,7 @@ class CallViewModel : ViewModel() {
             phoneNumber = "+1 (555) 234-5678",
             avatarUrl = com.example.model.DataRepository.SARAH_AVATAR_URL,
             initials = caller.take(2).uppercase(),
-            callType = if (isSpatial) "3D Spatial" else "Video",
+            callType = "Live Video",
             direction = "Outgoing",
             durationSeconds = finalSeconds,
             durationFormatted = durationFormatted,
@@ -326,7 +308,7 @@ class CallViewModel : ViewModel() {
             timestampFormatted = "Just now",
             period = "TODAY",
             isOnline = true,
-            isSpatial = isSpatial,
+            isSpatial = false,
             latencyMs = _uiState.value.latencyMs
           )
         )
@@ -336,6 +318,7 @@ class CallViewModel : ViewModel() {
 
   override fun onCleared() {
     super.onCleared()
+    agoraManager.leaveChannel()
     timerJob?.cancel()
     latencySimJob?.cancel()
   }
