@@ -51,6 +51,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.CallHistoryRepository
+import com.example.data.repository.CallSignalingRepository
+import com.example.model.CallSessionState
 import com.example.model.DataRepository
 import com.example.ui.components.CallControlsOverlay
 import com.example.ui.components.LiveVolumeAvatar
@@ -58,6 +60,8 @@ import com.example.ui.theme.LivePrimaryContainer
 import com.example.ui.theme.LiveSuccess
 import com.example.util.HapticType
 import com.example.util.HapticsManager
+import com.example.util.InAppNotificationManager
+import com.example.util.InAppNotificationType
 import com.example.viewmodel.CallViewModel
 
 /**
@@ -67,6 +71,7 @@ import com.example.viewmodel.CallViewModel
 @Composable
 fun CallScreen(
   callerName: String = "Live Contact",
+  channelName: String? = null,
   onEndCall: () -> Unit,
   modifier: Modifier = Modifier,
   viewModel: CallViewModel = viewModel()
@@ -76,9 +81,26 @@ fun CallScreen(
 
   val context = LocalContext.current
   val callHistoryRepository = remember { CallHistoryRepository.getInstance(context) }
+  val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
+  val activeSession by signalingRepo.activeSession.collectAsStateWithLifecycle()
 
-  LaunchedEffect(callerName) {
-    viewModel.initializeCall(callerName)
+  LaunchedEffect(callerName, channelName) {
+    viewModel.initializeCall(callerName, channelName)
+  }
+
+  // React to remote user declining or ending the call
+  LaunchedEffect(activeSession?.state) {
+    if (activeSession?.state == CallSessionState.REJECTED) {
+      InAppNotificationManager.postNotification(
+        title = "Call Declined",
+        message = "$callerName declined the call.",
+        type = InAppNotificationType.GENERAL,
+        context = context
+      )
+      onEndCall()
+    } else if (activeSession?.state == CallSessionState.ENDED && activeSession?.callId?.isNotBlank() == true) {
+      onEndCall()
+    }
   }
 
   val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -355,6 +377,7 @@ fun CallScreen(
         },
         onEndCall = {
           HapticsManager.trigger(context, HapticType.CALL_END)
+          signalingRepo.endCall()
           viewModel.endCall(callHistoryRepository)
           onEndCall()
         }

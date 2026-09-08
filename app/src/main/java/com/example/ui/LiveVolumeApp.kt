@@ -38,7 +38,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,8 +62,12 @@ sealed class Screen(val route: String) {
   data object Auth : Screen("auth")
   data object Main : Screen("main")
   data object Profile : Screen("profile")
-  data object Call : Screen("call/{callerName}") {
-    fun createRoute(callerName: String) = "call/${java.net.URLEncoder.encode(callerName, "UTF-8")}"
+  data object Call : Screen("call/{callerName}?channel={channelName}") {
+    fun createRoute(callerName: String, channelName: String? = null): String {
+      val encName = java.net.URLEncoder.encode(callerName, "UTF-8")
+      val encChan = channelName?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: ""
+      return "call/$encName?channel=$encChan"
+    }
   }
   data object Guides : Screen("guides")
   data object Help : Screen("help")
@@ -82,6 +86,12 @@ fun LiveVolumeApp() {
   val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
   val currentInAppNotification by InAppNotificationManager.currentNotification.collectAsStateWithLifecycle()
   val startDestination = if (currentUser != null) Screen.Main.route else Screen.Auth.route
+
+  // Automatically start listening for incoming call invites
+  androidx.compose.runtime.LaunchedEffect(currentUser) {
+    val myName = currentUser?.name ?: "Me"
+    signalingRepo.startListeningForIncomingCalls(myName)
+  }
 
   Box(
     modifier = Modifier
@@ -129,7 +139,12 @@ fun LiveVolumeApp() {
     composable(Screen.Main.route) {
       MainShellScreen(
         onStartCall = { callerName ->
-          navController.navigate(Screen.Call.createRoute(callerName))
+          val myName = currentUser?.name ?: "Me"
+          val session = signalingRepo.startCall(
+            callerName = myName,
+            receiverName = callerName
+          )
+          navController.navigate(Screen.Call.createRoute(callerName, session.channelName))
         },
         onOpenProfile = {
           navController.navigate(Screen.Profile.route)
@@ -176,19 +191,31 @@ fun LiveVolumeApp() {
         navArgument("callerName") {
           type = NavType.StringType
           defaultValue = "Live Contact"
+        },
+        navArgument("channelName") {
+          type = NavType.StringType
+          defaultValue = ""
         }
       )
     ) { backStackEntry ->
       val rawName = backStackEntry.arguments?.getString("callerName") ?: "Live Contact"
+      val rawChannel = backStackEntry.arguments?.getString("channelName") ?: ""
       val callerName = try {
         java.net.URLDecoder.decode(rawName, "UTF-8")
       } catch (e: Exception) {
         rawName
       }
+      val channelName = try {
+        java.net.URLDecoder.decode(rawChannel, "UTF-8").ifBlank { null }
+      } catch (e: Exception) {
+        null
+      }
 
       CallScreen(
         callerName = callerName,
+        channelName = channelName,
         onEndCall = {
+          signalingRepo.endCall()
           navController.popBackStack()
         }
       )
@@ -257,33 +284,33 @@ fun LiveVolumeApp() {
     }
   )
 
-  // Incoming Real-time 3D Call Notification Dialog
+  // Incoming Real-time Video Call Notification Dialog
   incomingCall?.let { call ->
     AlertDialog(
       onDismissRequest = { signalingRepo.dismissIncomingCall() },
       title = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Default.ViewInAr, contentDescription = null, tint = LivePrimaryContainer)
+          Icon(Icons.Default.Videocam, contentDescription = null, tint = LivePrimaryContainer)
           Spacer(modifier = Modifier.width(8.dp))
-          Text("Incoming 3D Spatial Call", fontWeight = FontWeight.Bold)
+          Text("Incoming Video Call", fontWeight = FontWeight.Bold)
         }
       },
       text = {
-        Text("${call.callerName} is calling you with live volumetric depth and spatial audio.")
+        Text("${call.callerName} is calling you via LiveVolume.")
       },
       confirmButton = {
         Button(
           onClick = {
-            signalingRepo.dismissIncomingCall()
-            navController.navigate(Screen.Call.createRoute(call.callerName))
+            signalingRepo.acceptCall(call)
+            navController.navigate(Screen.Call.createRoute(call.callerName, call.channelName))
           },
           colors = ButtonDefaults.buttonColors(containerColor = LivePrimaryContainer)
         ) {
-          Text("Answer (3D)", fontWeight = FontWeight.Bold)
+          Text("Answer", fontWeight = FontWeight.Bold)
         }
       },
       dismissButton = {
-        TextButton(onClick = { signalingRepo.dismissIncomingCall() }) {
+        TextButton(onClick = { signalingRepo.declineCall(call) }) {
           Text("Decline", color = LiveError)
         }
       }
