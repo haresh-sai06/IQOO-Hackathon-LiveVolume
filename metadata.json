@@ -1,0 +1,6 @@
+{
+  "name": "LiveVolume",
+  "description": "LiveVolume spatial 3D video calling app with real-time on-device depth and binaural spatial audio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
