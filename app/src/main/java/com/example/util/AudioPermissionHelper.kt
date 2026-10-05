@@ -8,7 +8,7 @@ import android.media.AudioRecord
 import androidx.core.content.ContextCompat
 
 /**
- * Helper to ensure audio capture is authorized and prepared for binaural spatial processing.
+ * Helper to ensure microphone capture is authorized for Agora RTC calling.
  */
 object AudioPermissionHelper {
 
@@ -25,17 +25,17 @@ object AudioPermissionHelper {
   }
 
   /**
-   * Ensures audio capture is authorized for binaural 3D spatial audio processing.
+   * Ensures microphone capture is authorized for live calling.
    *
    * @param context Application or Activity context.
-   * @return True if permission is granted and binaural audio capture can proceed.
+   * @return True if microphone permission is granted.
    */
   fun isAudioCaptureAuthorized(context: Context): Boolean {
     return hasRecordAudioPermission(context)
   }
 
   /**
-   * Verifies hardware readiness for high-fidelity binaural spatial capture (48kHz stereo).
+   * Verifies hardware readiness for 48kHz stereo capture (experimental spatial pipeline).
    */
   fun verifyBinauralAudioCapability(context: Context): BinauralCaptureStatus {
     if (!isAudioCaptureAuthorized(context)) {

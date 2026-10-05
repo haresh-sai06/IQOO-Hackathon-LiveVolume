@@ -29,8 +29,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * AudioProcessingService captures raw PCM audio data and applies
- * real-time binaural spatialization effects using an HRTF filter approximation.
+ * Experimental local PCM capture + HRTF-style binaural filter.
+ *
+ * IMPORTANT: Processed buffers are NOT currently published into the Agora RTC
+ * audio track. Call audio uses Agora's standard mic path. Do not market this
+ * service as live spatial/binaural calling until a real sink is wired.
  */
 class AudioProcessingService : Service() {
 
@@ -262,7 +265,7 @@ class AudioProcessingService : Service() {
    * Callback hook when a binaural spatialized buffer has been processed.
    */
   private fun onBinauralPcmProcessed(binauralPcm: ShortArray) {
-    // Placeholder pipeline hook for WebRTC audio track streaming or binaural sink
+    // Placeholder only — not wired to Agora publishMicrophoneTrack / custom audio source.
   }
 
   /**

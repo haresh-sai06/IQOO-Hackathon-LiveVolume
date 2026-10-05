@@ -381,7 +381,7 @@ fun GuidesScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-          text = "Pro Tip:\n• Hold your phone between 18 and 28 inches from your face for optimal depth triangulation.\n• Ambient natural light from the front creates the sharpest 3D contours with zero sensor noise.\n• Put on standard stereo headphones to enable binaural spatial audio and pinpoint the speaker in 3D.",
+          text = "Pro Tip:\n• Hold your phone between 18 and 28 inches from your face for cleaner depth silhouettes.\n• Ambient front lighting creates sharper 3D contours.\n• Headphones improve call audio clarity; on-device spatial/HRTF processing is experimental and not mixed into Agora yet.",
           style = MaterialTheme.typography.bodyMedium,
           color = MaterialTheme.colorScheme.onSurface,
           lineHeight = 22.sp

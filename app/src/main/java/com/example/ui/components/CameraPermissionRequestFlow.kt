@@ -133,7 +133,7 @@ fun CameraPermissionRequestFlow(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-          text = "To enable real-time 3D holographic video calling and binaural spatial audio, LiveVolume requires camera and microphone authorization.",
+          text = "To enable real-time 3D volumetric video calling over Agora RTC, LiveVolume requires camera and microphone authorization.",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           lineHeight = 18.sp

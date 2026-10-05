@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.BuildConfig
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -270,78 +272,80 @@ fun NotificationsScreen(
         }
       }
 
-      Spacer(modifier = Modifier.height(18.dp))
+      if (BuildConfig.DEBUG) {
+        Spacer(modifier = Modifier.height(18.dp))
 
-      Text(
-        text = "Test FCM In-App Banner",
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface
-      )
+        Text(
+          text = "Debug: Test In-App Banner",
+          style = MaterialTheme.typography.labelMedium,
+          fontWeight = FontWeight.SemiBold,
+          color = MaterialTheme.colorScheme.onSurface
+        )
 
-      Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-      ) {
-        Button(
-          onClick = {
-            HapticsManager.trigger(context, HapticType.LIGHT)
-            InAppNotificationManager.postNotification(
-              title = "Missed 3D Spatial Call",
-              message = "Sarah Chen called with live volumetric depth & binaural audio",
-              type = InAppNotificationType.CALL_MISSED,
-              context = context
-            )
-          },
-          modifier = Modifier
-            .weight(1f)
-            .height(44.dp),
-          shape = RoundedCornerShape(12.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = LivePrimaryContainer)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.CallMissed,
-              contentDescription = null,
-              modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Missed Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          Button(
+            onClick = {
+              HapticsManager.trigger(context, HapticType.LIGHT)
+              InAppNotificationManager.postNotification(
+                title = "Missed 3D Call",
+                message = "Debug preview — incoming volumetric call notification",
+                type = InAppNotificationType.CALL_MISSED,
+                context = context
+              )
+            },
+            modifier = Modifier
+              .weight(1f)
+              .height(44.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = LivePrimaryContainer)
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.CallMissed,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Missed Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
           }
-        }
 
-        OutlinedButton(
-          onClick = {
-            HapticsManager.trigger(context, HapticType.LIGHT)
-            InAppNotificationManager.postNotification(
-              title = "Spatial Audio Linked",
-              message = "Stereo headphones detected — HRTF azimuth tracking active",
-              type = InAppNotificationType.SPATIAL_AUDIO,
-              context = context
-            )
-          },
-          modifier = Modifier
-            .weight(1f)
-            .height(44.dp),
-          shape = RoundedCornerShape(12.dp),
-          border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.dp)
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-              imageVector = Icons.Default.Headphones,
-              contentDescription = null,
-              tint = LivePrimaryContainer,
-              modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              "Spatial Link",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.SemiBold,
-              color = LivePrimaryContainer
-            )
+          OutlinedButton(
+            onClick = {
+              HapticsManager.trigger(context, HapticType.LIGHT)
+              InAppNotificationManager.postNotification(
+                title = "Call audio ready",
+                message = "Debug preview — Agora audio path active (spatial processing is experimental)",
+                type = InAppNotificationType.SPATIAL_AUDIO,
+                context = context
+              )
+            },
+            modifier = Modifier
+              .weight(1f)
+              .height(44.dp),
+            shape = RoundedCornerShape(12.dp),
+            border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.dp)
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(
+                imageVector = Icons.Default.Headphones,
+                contentDescription = null,
+                tint = LivePrimaryContainer,
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                "Audio Link",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = LivePrimaryContainer
+              )
+            }
           }
         }
       }

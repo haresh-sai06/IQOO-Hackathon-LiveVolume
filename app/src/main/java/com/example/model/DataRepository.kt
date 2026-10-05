@@ -20,13 +20,14 @@ object DataRepository {
   const val LIGHTING_GUIDE_URL =
     "https://lh3.googleusercontent.com/aida-public/AB6AXuDphO7c-ehF3nFwdUlVay2naDhgCRkNCtA0MnOnqhgWrmCTdPKY-iNXSZFbev4Pa8Ps0upHRc2PX5bzUb4egMxoerYl0moUdYmkEFB1SvsyZoxcaKEErt5ETG6xPqQugcBrS7WQ9b12JeY1otDVx2Tm2P4Z0SyQNb-KGEbnZHbHFK-POEWrANbBLRTCSQQlZ9qCSfApQGGEuLZdOGuqCwpeVqIOKMcF1LAgNNQsj8qsL41fAqwktE1Z"
 
+  /** Placeholder only — UI uses AuthRepository / RealtimeContactsRepository for live data. */
   val myProfile = Contact(
     id = "my_card",
-    name = "Sarah Chen",
-    initials = "SC",
-    phone = "+1 (555) 349-8201",
-    status = "3D Live Enabled",
-    avatarUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuDY-kuwHnfBauA9LWiDld3tkQs-sYEcWZamwDabaPwKo-DWinE-1CYLeVi3X4bZeVJ0JTt3hkq1ls1vaz3FyCE9qXtp12jmYdDynQpQsaBSdVo9M8Ja7XiI0cyYYMBXtrXer7Ljyqpvpj4vDGvFy-bUutzLW9ieUNcA9Yzc3H1HTc8sn_jzi834G0G4DeLkQZOlzsf-IH1k82egIvlGyC5A35vKGvQPEYvvurKOVZWojYXdfx9LLt8j",
+    name = "LiveVolume User",
+    initials = "LV",
+    phone = "",
+    status = "3D Live Ready",
+    avatarUrl = null,
     isSpatialReady = true,
     isOnline = true
   )
@@ -37,7 +38,7 @@ object DataRepository {
       name = "Alex R.",
       initials = "AR",
       phone = "+1 (555) 892-1200",
-      status = "Spatial Audio • Available",
+      status = "3D Live Ready",
       avatarUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuDudrMDX5P7Xau2rYTJoWs_U3mfmIVFS6g0U-C2G4kulP8Fwo0qYIrvBIaL4ZgheFVTdPh4Wbf3iXQZH-2sjLftpYgQ7qsufkGdIDqSKHWBrmY4uTMkB2jSCCpxdAhG07bn1DOs4k9vtubWSW4bTxaXxc1BDEI4gwpfD42LXHJ89atSmKrTZFgu-OPoUDhO4uQTnKT-8n02aNpTKMoAX_vjtcMpTPg7fXf6qmdYJq25f3DiJ4Q-D7JS",
       isSpatialReady = true,
       isOnline = true,
@@ -49,7 +50,7 @@ object DataRepository {
       name = "Maya Lin",
       initials = "ML",
       phone = "+1 (555) 301-4491",
-      status = "Binaural Headset Connected",
+      status = "Available",
       avatarUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuDBqk9hrQK4gtxhtzkr-LilcT0qTDX8sNUiNaYYymwortROHxX_k2zNH3EvkPl_61an8F8pSYVh1Bhd805EH3X5pn2ZZxq321gKto412FbtOevkOw8VVT_sEutyjzVXGMV837zO0rwiZnCoSu8qISxtWToyI4OggwLlPtPB7UeycSYFJD9Dtj8BScLnSsSPBhx0w-dIjRbcBsSNQt_Tm8RLKZomRoEcpGfsCVwwMLtj4YZeaIS2RYl7",
       isSpatialReady = true,
       isOnline = true,
@@ -88,7 +89,7 @@ object DataRepository {
       name = "Alex Rivera",
       initials = "AR",
       phone = "+1 (555) 892-1200",
-      status = "Spatial Audio • Available",
+      status = "3D Live Ready",
       avatarUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuBcApQNvvUXPWfxxC6QbKdnm2BoQ6H3aaDPliLINq9_6gU6N-4mxmwAGvoTHnqi-XoBfIEnncz6QTflUCGt1mORb6PzdzN5WlgCk_bT4lwVl46UbXwQqsWgL_-pMMmjElMoGhskPsy5KeUk2T_xYlCUfvk0Ye-ibTpnVcR82xD9mpwaDjH3n4XgEozysgUwKIx1nZseKtYAvuxNUqxrF7lI9m8shuXhElqgfhMTVGU8fnY1sPj3BmvL",
       isSpatialReady = true,
       isOnline = true,
@@ -148,7 +149,7 @@ object DataRepository {
       name = "Maya Lin",
       initials = "ML",
       phone = "+1 (555) 301-4491",
-      status = "Binaural Headset Connected",
+      status = "Available",
       avatarUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuCav6fsIh8Jg74vUi0cgtJ7sQBUJd0yV-Lo7O415oqZ_FjIQG2VIJOn_Segj5VWlR6L07POH8Vk6-JMz8RCIVF3F07XF5Iuk-P_k4kEIz2KHtfmDDx6KGUYSUjtjST0T3syCJZ_g88GpG4HOnBtE1rYJeSbLqTsdmhzuzUtS5UFGqlxFDBEpf9PZ7F0iFqEc1brBnDeIDY-Rz1jnS707PV_kkvQPbPxe28Mq93GZ57e2K2SFNOWZAi5",
       isSpatialReady = true,
       isOnline = true,
@@ -184,7 +185,7 @@ object DataRepository {
   val callRecords = listOf(
     CallRecord(
       id = "call_1",
-      contactName = "Sarah Chen",
+      contactName = "Sample Contact",
       initials = "SC",
       avatarUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuDY-kuwHnfBauA9LWiDld3tkQs-sYEcWZamwDabaPwKo-DWinE-1CYLeVi3X4bZeVJ0JTt3hkq1ls1vaz3FyCE9qXtp12jmYdDynQpQsaBSdVo9M8Ja7XiI0cyYYMBXtrXer7Ljyqpvpj4vDGvFy-bUutzLW9ieUNcA9Yzc3H1HTc8sn_jzi834G0G4DeLkQZOlzsf-IH1k82egIvlGyC5A35vKGvQPEYvvurKOVZWojYXdfx9LLt8j",
       callType = CallType.SPATIAL_3D,
@@ -244,7 +245,7 @@ object DataRepository {
     ),
     CallRecord(
       id = "call_6",
-      contactName = "Sarah Chen",
+      contactName = "Sample Contact",
       initials = "SC",
       avatarUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuDY-kuwHnfBauA9LWiDld3tkQs-sYEcWZamwDabaPwKo-DWinE-1CYLeVi3X4bZeVJ0JTt3hkq1ls1vaz3FyCE9qXtp12jmYdDynQpQsaBSdVo9M8Ja7XiI0cyYYMBXtrXer7Ljyqpvpj4vDGvFy-bUutzLW9ieUNcA9Yzc3H1HTc8sn_jzi834G0G4DeLkQZOlzsf-IH1k82egIvlGyC5A35vKGvQPEYvvurKOVZWojYXdfx9LLt8j",
       callType = CallType.SPATIAL_3D,
@@ -277,7 +278,7 @@ object DataRepository {
     FaqItem(
       id = "faq_2",
       question = "What devices are supported?",
-      answer = "Any modern smartphone running iOS 15+ or Android 11+ with a standard front-facing camera is supported. The depth model runs directly on your device processor."
+      answer = "LiveVolume is an Android app (minSdk 24). Use a physical device with camera and microphone — e.g. iQOO / vivo. The depth model runs on-device via TensorFlow Lite."
     ),
     FaqItem(
       id = "faq_3",
@@ -287,7 +288,7 @@ object DataRepository {
     FaqItem(
       id = "faq_4",
       question = "Is my 3D spatial data private?",
-      answer = "Yes, entirely. Depth calculations take place in real-time on your phone. No raw biometric depth maps or room scans are ever stored or transmitted to external servers. Your video call is end-to-end encrypted."
+      answer = "Depth estimation runs on-device. Raw depth maps are not uploaded to our servers. Video, audio, and point-cloud packets are sent through Agora RTC with transport encryption — not app-held end-to-end encryption where only you hold keys."
     ),
     FaqItem(
       id = "faq_5",
@@ -306,9 +307,9 @@ object DataRepository {
     ),
     GuideItem(
       id = "g_2",
-      title = "Optimizing Spatial Audio with Headphones",
-      summary = "Hear callers speak from their actual position.",
-      category = "Spatial Audio",
+      title = "Audio tips for clear calls",
+      summary = "Use headphones for cleaner capture; spatial audio is experimental and not yet mixed into the Agora call path.",
+      category = "Audio",
       iconName = "headphones"
     ),
     GuideItem(
@@ -331,17 +332,17 @@ object DataRepository {
     PrivacySection(
       number = 1,
       title = "Information We Collect",
-      content = "We collect standard account identifiers (such as your verified phone number or email address) strictly to authenticate you and enable directory lookups between saved contacts.\n\nStrict Policy: We never collect, inspect, store, or train AI models on your volumetric 3D point cloud streams or spatial audio feeds."
+      content = "We collect standard account identifiers (such as your verified phone number or email address) strictly to authenticate you and enable directory lookups between saved contacts.\n\nStrict Policy: We do not store volumetric point-cloud streams after a call ends. Depth inference runs on-device; media still traverses Agora during the call."
     ),
     PrivacySection(
       number = 2,
       title = "Device Permissions Usage",
-      content = "• Camera: Required only during active live calls for real-time monocular depth estimation.\n• Microphone: Required for live binaural spatial audio capture during calls.\n• Neural Engine / WebRTC: Used for on-device depth estimation and P2P connection handshake."
+      content = "• Camera: Required during live calls for monocular depth estimation and video.\n• Microphone: Required for Agora RTC voice during calls.\n• On-device ML: TensorFlow Lite (MiDaS + selfie segmentation) for depth/silhouette.\n• Network: Agora RTC carries media and point-cloud data streams (not a custom WebRTC P2P stack)."
     ),
     PrivacySection(
       number = 3,
-      title = "Peer-to-Peer Data Transfer",
-      content = "Whenever network topology allows, calls connect directly peer-to-peer (P2P). If restrictive firewalls necessitate a TURN relay, the relay transmits only encrypted packets and cannot decrypt the spatial stream."
+      title = "Media Transport (Agora RTC)",
+      content = "Calls use Agora RTC for video, audio, and data-stream point clouds. Traffic is routed through Agora's media network with transport encryption. This project does not implement a custom end-to-end encrypted WebRTC P2P mesh where only participants hold keys."
     ),
     PrivacySection(
       number = 4,

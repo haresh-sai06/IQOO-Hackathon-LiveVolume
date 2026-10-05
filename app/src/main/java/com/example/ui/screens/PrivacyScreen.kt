@@ -183,9 +183,9 @@ fun PrivacyScreen(
 
       PrivacyPillarCard(
         icon = Icons.Default.Lock,
-        title = "End-to-End Encrypted Calls",
-        tag = "AES-256",
-        desc = "Live volumetric point cloud streams and binaural audio packets are cryptographically sealed. Only you and your caller hold decryption keys."
+        title = "Encrypted Agora Media Transport",
+        tag = "Agora RTC",
+        desc = "Video, audio, and point-cloud data travel over Agora RTC with transport encryption. This is not app-held end-to-end encryption; Agora operates the media plane."
       )
 
       PrivacyPillarCard(
