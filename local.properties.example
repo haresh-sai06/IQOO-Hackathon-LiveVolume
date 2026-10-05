@@ -1,0 +1,13 @@
+# Copy to local.properties (gitignored) and fill in values for local builds.
+# Do NOT commit local.properties or google-services.json with real secrets.
+
+## Android SDK (Android Studio usually writes this automatically)
+# sdk.dir=/Users/YOU/Library/Android/sdk
+# sdk.dir=C:\\Users\\YOU\\AppData\\Local\\Android\\Sdk
+# sdk.dir=/home/YOU/Android/Sdk
+
+## Agora RTC (required for live video + point-cloud data stream)
+## Create a project at https://console.agora.io/ and paste the App ID (not the certificate/primary key unless you add token auth).
+AGORA_APP_ID=YOUR_AGORA_APP_ID
+
+## Optional: same value can be passed as env AGORA_APP_ID or -PAGORA_APP_ID=...

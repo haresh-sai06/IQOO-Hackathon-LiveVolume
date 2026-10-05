@@ -23,7 +23,7 @@ Developed for the **iQOO Hackathon**.
 - **Two-Way Video & Audio (Agora RTC SDK)**: Native peer video streaming, PiP self-view, hardware camera switching (front/back), audio mute, speakerphone routing, and live decibel audio level metering.
 - **Call Ringing & Handshake (Cloud Firestore + FCM)**: Real-time call invite documents and Firebase Cloud Messaging heads-up notifications with interactive *Answer* and *Decline* actions.
 - **Clean 2D / 3D Experience (DESIGN.md Compliant)**: Sleek two-state pill toggle (`"2D"` vs `"3D"`) with zero technical jargon, floating HUD controls, and haptic feedback.
-- **Hardened Performance Architecture**: Asynchronous model loading, hardware `PixelCopy` capture decoupled from the UI thread, dynamic latency clamping to prevent frame drops, and a hidden *Performance Fallback Mode* in Settings.
+- **Performance Architecture**: Asynchronous model loading, hardware `PixelCopy` capture off the UI thread, and a Settings performance-fallback mode for lighter devices.
 
 ---
 
@@ -120,40 +120,63 @@ app/src/main/
 ## 📲 Getting Started
 
 ### Prerequisites
-- **Android Studio Ladybug (2024.2+)** or newer
-- **JDK 17** or **JDK 21**
-- **Android SDK 35** (Minimum SDK: 26 / Android 8.0 Oreo)
-- Physical Android device with camera & microphone (e.g., iQOO / Vivo device)
+- **Android Studio Ladybug (2024.2+)** or newer (or cmdline SDK + JDK)
+- **JDK 17** (or 21)
+- **Android SDK** with `compileSdk` 36 / `minSdk` 24
+- **Git LFS** (TFLite models are stored with Git LFS — without it you get pointer files and depth will fail)
+- Two physical Android devices with camera & microphone for a real 3D demo (e.g. iQOO / vivo)
+
+### What you must supply (not in git)
+| Secret / file | Where | Required for |
+|---|---|---|
+| **Agora App ID** | `local.properties` → `AGORA_APP_ID=...` (preferred), or env `AGORA_APP_ID`, or `-PAGORA_APP_ID=...` | Live video + point-cloud data stream |
+| **`app/google-services.json`** | Download from your Firebase project | Auth, Firestore call signaling, FCM |
+| Two phones on the same Agora channel | — | Finale two-way demo |
+
+Never commit real Agora keys or `google-services.json`. Templates: `local.properties.example`. The Google Services Gradle plugin is set to **WARN** if `google-services.json` is missing, so debug APKs can still compile — Firebase features will be unavailable until you add the file.
 
 ### Setup & Installation
 
-1. **Clone the repository**:
+1. **Clone with Git LFS**:
    ```bash
+   git lfs install
    git clone https://github.com/haresh-sai06/IQOO-Hackathon-LiveVolume.git
    cd IQOO-Hackathon-LiveVolume
+   git lfs pull
+   # Confirm real model files (tens of MB), not tiny LFS pointer text:
+   ls -lh app/src/main/assets/*.tflite
    ```
 
-2. **Configure API Keys**:
-   - Create or update `gradle.properties`:
-     ```properties
-     AGORA_APP_ID=your_agora_app_id_here
-     ```
-   - Place your `google-services.json` in `app/google-services.json` for Firebase authentication, Firestore signaling, and FCM push notifications.
-
-3. **Build the project**:
+2. **Configure local secrets** (gitignored):
    ```bash
-   ./gradlew assembleDebug
+   cp local.properties.example local.properties
+   # Edit local.properties:
+   #   sdk.dir=...          # Android Studio usually writes this
+   #   AGORA_APP_ID=...     # from https://console.agora.io/
+   ```
+   Place Firebase config at:
+   ```bash
+   app/google-services.json
    ```
 
-4. **Install on connected device**:
+3. **Build a debug APK**:
+   ```bash
+   ./gradlew :app:assembleDebug
+   ```
+   Output: `app/build/outputs/apk/debug/app-debug.apk`
+
+4. **Install on a connected device**:
    ```bash
    adb install -r ./app/build/outputs/apk/debug/app-debug.apk
-   ```
-
-5. **Launch LiveVolume**:
-   ```bash
    adb shell am start -n com.aistudio.livevolume.vknrz/com.example.MainActivity
    ```
+   Note: `applicationId` is `com.aistudio.livevolume.vknrz` (AI Studio heritage). User-visible name is **LiveVolume**. Do not treat the package id as product branding in decks.
+
+### Honest product notes (Grand Finale)
+- **On-device depth + silhouette → point cloud → Agora data stream → OpenGL orbit** is the real core.
+- **Latency HUD** shows Agora RTC `gatewayRtt` / `lastmileDelay` when available (no invented 16–45 ms simulator).
+- **Spatial / binaural audio** is experimental local processing and is **not** mixed into the Agora publish path yet — do not claim live binaural calling.
+- **Privacy**: media uses Agora transport encryption; this is **not** app-held E2EE / “only you hold keys” / custom WebRTC P2P.
 
 ---
 
