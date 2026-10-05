@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.BuildConfig
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -121,7 +123,7 @@ fun AboutScreen(
         )
 
         Text(
-          text = "Spatial 3D Video Calling",
+          text = "On-device 3D volumetric video calling",
           style = MaterialTheme.typography.bodyMedium,
           color = LivePrimaryContainer,
           fontWeight = FontWeight.SemiBold
@@ -130,7 +132,7 @@ fun AboutScreen(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-          text = "Version 1.4.2 • Build 2025.1",
+          text = "Version ${BuildConfig.VERSION_NAME} • debug-ready finale build",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.outline
         )

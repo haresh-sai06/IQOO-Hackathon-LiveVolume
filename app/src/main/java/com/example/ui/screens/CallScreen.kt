@@ -302,7 +302,7 @@ fun CallScreen(
             verticalArrangement = Arrangement.Center
           ) {
             LiveVolumeAvatar(
-              avatarUrl = DataRepository.SARAH_AVATAR_URL,
+              avatarUrl = null,
               initials = callerName.take(2).uppercase(),
               size = 92.dp,
               showOnlineBadge = false
@@ -397,7 +397,7 @@ fun CallScreen(
           .testTag("persistent_call_duration_timer")
       ) {
         LiveVolumeAvatar(
-          avatarUrl = DataRepository.SARAH_AVATAR_URL,
+          avatarUrl = null,
           initials = callerName.take(2).uppercase(),
           size = 32.dp,
           showOnlineBadge = false

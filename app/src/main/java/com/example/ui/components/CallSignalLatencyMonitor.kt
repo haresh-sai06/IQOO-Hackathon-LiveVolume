@@ -58,13 +58,13 @@ import kotlin.math.min
 import kotlin.random.Random
 
 data class StreamTelemetry(
-  val latency: Int = 24,
-  val fps: Int = 60,
-  val bitrate: Float = 18.4f,
-  val jitter: Float = 1.1f,
-  val meshQuality: String = "Optimal 3D",
-  val signalBars: Int = 4,
-  val connectionType: String = "5G Spatial"
+  val latency: Int = -1,
+  val fps: Int = 0,
+  val bitrate: Float = 0f,
+  val jitter: Float = 0f,
+  val meshQuality: String = "Awaiting stats",
+  val signalBars: Int = 0,
+  val connectionType: String = "Agora RTC"
 )
 
 /**
@@ -76,7 +76,7 @@ fun CallSignalLatencyMonitor(
   latencyMs: Int = 24,
   connectionQuality: Any? = null,
   connectionStatus: Any? = null,
-  binauralActive: Boolean = true,
+  binauralActive: Boolean = false,
   azimuthDegrees: Float = 0f,
   modifier: Modifier = Modifier
 ) {
@@ -84,30 +84,35 @@ fun CallSignalLatencyMonitor(
   var isExpanded by remember { mutableStateOf(false) }
 
   var telemetry by remember { mutableStateOf(StreamTelemetry()) }
-  val latencyHistory = remember { mutableStateListOf(23, 25, 24, 26, 22, 24, 25, 24) }
+  val latencyHistory = remember { mutableStateListOf<Int>() }
 
-  // Periodic natural telemetry variance
-  LaunchedEffect(Unit) {
-    while (true) {
-      delay(1800)
-      val delta = Random.nextInt(-2, 3)
-      val nextLatency = max(18, min(38, telemetry.latency + delta))
-      val nextBitrate = max(14.2f, min(22.5f, telemetry.bitrate + (Random.nextFloat() * 0.8f - 0.4f)))
-      val nextJitter = max(0.6f, min(2.4f, telemetry.jitter + (Random.nextFloat() * 0.4f - 0.2f)))
-
-      if (latencyHistory.size >= 10) {
-        latencyHistory.removeAt(0)
-      }
-      latencyHistory.add(nextLatency)
-
-      telemetry = telemetry.copy(
-        latency = nextLatency,
-        bitrate = String.format("%.1f", nextBitrate).toFloatOrNull() ?: nextBitrate,
-        jitter = String.format("%.1f", nextJitter).toFloatOrNull() ?: nextJitter,
-        fps = if (nextLatency > 34) 59 else 60,
-        meshQuality = if (nextLatency > 32) "High Fidelity" else "Optimal 3D"
-      )
+  // Drive HUD from real Agora RTT passed by CallViewModel (no invented numbers).
+  LaunchedEffect(latencyMs) {
+    val bars = when {
+      latencyMs < 0 -> 0
+      latencyMs < 45 -> 4
+      latencyMs < 85 -> 3
+      latencyMs < 150 -> 2
+      else -> 1
     }
+    val quality = when {
+      latencyMs < 0 -> "Awaiting Agora stats"
+      latencyMs < 85 -> "Agora link OK"
+      else -> "High latency"
+    }
+    if (latencyMs >= 0) {
+      if (latencyHistory.size >= 10) latencyHistory.removeAt(0)
+      latencyHistory.add(latencyMs)
+    }
+    telemetry = telemetry.copy(
+      latency = latencyMs,
+      signalBars = bars,
+      meshQuality = quality,
+      connectionType = "Agora RTC",
+      fps = 0,
+      bitrate = 0f,
+      jitter = 0f
+    )
   }
 
   val pulseAnim = rememberInfiniteTransition(label = "pulse")
@@ -122,8 +127,9 @@ fun CallSignalLatencyMonitor(
   )
 
   val qualityColor = when {
-    telemetry.latency <= 28 -> Color(0xFF10B981)
-    telemetry.latency <= 45 -> Color(0xFFF59E0B)
+    telemetry.latency < 0 -> Color(0xFF94A3B8)
+    telemetry.latency <= 45 -> Color(0xFF10B981)
+    telemetry.latency <= 85 -> Color(0xFFF59E0B)
     else -> Color(0xFFEF4444)
   }
 
@@ -178,9 +184,9 @@ fun CallSignalLatencyMonitor(
 
         Spacer(modifier = Modifier.width(5.dp))
 
-        // Latency
+        // Latency (Agora RTC stats; blank until first sample)
         Text(
-          text = "${telemetry.latency}ms",
+          text = if (telemetry.latency < 0) "— ms" else "${telemetry.latency}ms",
           color = Color.White,
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold,
@@ -464,7 +470,7 @@ fun CallSignalLatencyMonitor(
             )
             Spacer(modifier = Modifier.width(5.dp))
             Text(
-              text = "Binaural Spatial Sync: OK",
+              text = "Audio: Agora RTC (spatial experimental)",
               color = Color.White.copy(alpha = 0.7f),
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace

@@ -1,3 +1,4 @@
+import java.util.Properties
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
@@ -22,8 +23,20 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-    val agoraAppId = project.findProperty("AGORA_APP_ID") as? String 
-        ?: System.getenv("AGORA_APP_ID") 
+    // Resolve Agora App ID without committing secrets:
+    // 1) -PAGORA_APP_ID=... / gradle.properties
+    // 2) AGORA_APP_ID env
+    // 3) local.properties key AGORA_APP_ID (gitignored)
+    // 4) placeholder — app will refuse to join until configured
+    // Note: do not use java.util.* via `java.` here — `java` is shadowed inside android {}.
+    val localProps = Properties()
+    val localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) {
+      localPropsFile.inputStream().use { localProps.load(it) }
+    }
+    val agoraAppId = (project.findProperty("AGORA_APP_ID") as? String)
+        ?: System.getenv("AGORA_APP_ID")
+        ?: localProps.getProperty("AGORA_APP_ID")
         ?: "YOUR_AGORA_APP_ID"
     buildConfigField("String", "AGORA_APP_ID", "\"$agoraAppId\"")
   }

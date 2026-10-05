@@ -16,3 +16,6 @@
 local.properties
 .env
 debug.keystore
+
+# Local Firebase config (download from Firebase console; do not commit)
+app/google-services.json

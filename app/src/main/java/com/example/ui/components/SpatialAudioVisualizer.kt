@@ -38,8 +38,8 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 
 /**
- * On-screen binaural acoustic balance HUD widget displaying real-time
- * left/right ear spatial levels and virtual sound source azimuth localization.
+ * Experimental HUD for local azimuth / level visualization.
+ * Not proof that binaural audio is published on the Agora call path.
  */
 @Composable
 fun SpatialAudioVisualizer(
