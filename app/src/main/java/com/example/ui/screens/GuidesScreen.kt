@@ -55,7 +55,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.DataRepository
+import com.example.model.AppContent
 import com.example.model.GuideItem
 import com.example.ui.theme.LivePrimaryContainer
 
@@ -72,9 +72,9 @@ fun GuidesScreen(
 
   val filteredGuides = remember(selectedCategory) {
     if (selectedCategory == "All Guides") {
-      DataRepository.guides
+      AppContent.guides
     } else {
-      DataRepository.guides.filter { it.category == selectedCategory }
+      AppContent.guides.filter { it.category == selectedCategory }
     }
   }
 

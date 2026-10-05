@@ -121,7 +121,7 @@ app/src/main/
 
 ### Prerequisites
 - **Android Studio Ladybug (2024.2+)** or newer
-- **JDK 17** or **JDK 21**
+- **JDK 17** to build and run the app. Note that the *Firebase emulator suite* used by the integration tests additionally requires **JDK 21+**, and firebase-tools resolves `java` through `PATH` while ignoring `JAVA_HOME` — see [Testing](#-testing).
 - **Android SDK 35** (Minimum SDK: 26 / Android 8.0 Oreo)
 - Physical Android device with camera & microphone (e.g., iQOO / Vivo device)
 
@@ -133,12 +133,27 @@ app/src/main/
    cd IQOO-Hackathon-LiveVolume
    ```
 
-2. **Configure API Keys**:
-   - Create or update `gradle.properties`:
-     ```properties
-     AGORA_APP_ID=your_agora_app_id_here
-     ```
-   - Place your `google-services.json` in `app/google-services.json` for Firebase authentication, Firestore signaling, and FCM push notifications.
+2. **Configure the backend** — LiveVolume runs on Firebase (Auth, Firestore signaling, Cloud Messaging) plus Agora RTC. Copy the template and fill in your Agora credentials:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   ```properties
+   AGORA_APP_ID=your_agora_app_id_here
+   # Public URL of the token service in ./server (required for production)
+   AGORA_TOKEN_SERVER_URL=https://your-host.example.com/rtc-token
+   ```
+
+   The Secrets Gradle plugin turns these keys into `BuildConfig` fields, so no credentials are ever hard-coded. The same keys may be supplied as Gradle properties or environment variables.
+
+   Then wire up Firebase:
+   - Create a Firebase project and enable **Email/Password** authentication, **Cloud Firestore**, and **Cloud Messaging**.
+   - Download `google-services.json` and place it at `app/google-services.json` (git-ignored — inject it from CI secrets for release builds).
+   - Deploy the security rules: `firebase deploy --only firestore:rules`
+   - Deploy the Agora token service described in [`server/README.md`](server/README.md).
+
+   Without `google-services.json` the project still builds and runs, but accounts, contact discovery, call ringing and push are inert: Settings reports the backend as *not connected* and sign-in returns an explicit error instead of a fabricated local session.
 
 3. **Build the project**:
    ```bash
@@ -154,6 +169,44 @@ app/src/main/
    ```bash
    adb shell am start -n com.aistudio.livevolume.vknrz/com.example.MainActivity
    ```
+
+---
+
+## 🧪 Testing
+
+Two suites cover the call handshake at different levels.
+
+### Unit suite (no backend required)
+
+```bash
+./gradlew :app:testDebugUnitTest
+```
+
+`CallSignalingHandshakeTest` drives `CallSignalingRepository`'s state machine — invite, ring, duplicate suppression, dismissal, answer, decline, TTL expiry and teardown — over an in-memory transport, so the handshake is deterministic and needs no emulator. The same run also covers the Room call-history layer and the network-quality tiering.
+
+### Call-signaling integration suite (real Firestore + real security rules)
+
+```bash
+scripts/verify-call-signaling.sh
+```
+
+`FirestoreSignalingEmulatorTest` runs on a connected device against the Firebase emulator suite, and verifies what an in-memory fake cannot: the document schema written to `calls`, the `receiverId` + `state` query, the `update()`-then-`set()` fallback in device-token registration, the shape of listener callbacks, and that the shipped [`firebase/firestore.rules`](firebase/firestore.rules) allow — and deny — exactly what the transport depends on.
+
+The script exists because three prerequisites each fail in a way that looks like an unrelated timeout:
+
+1. **Java 21.** firebase-tools v15 rejects older runtimes, and it looks up `java` on `PATH` rather than `JAVA_HOME`. The JDK on `PATH` is frequently 17, so the script falls back to the JetBrains Runtime bundled with Android Studio.
+2. **`adb reverse`.** The device can only reach the emulator through a tunnel that is dropped every time the cable is unplugged. Without it, listeners stay silent and tests time out instead of erroring.
+3. **Cleartext policy.** Only loopback cleartext is allowed, so an emulator host alias has to be passed with `--host 10.0.2.2`.
+
+Flags:
+
+| Flag | Effect |
+| --- | --- |
+| `--unit` | Run only the JVM suite; no device or emulator needed |
+| `--keep-emulators` | Leave the emulator suite running afterwards |
+| `--host HOST` | Skip `adb reverse` and address the emulator directly (use `10.0.2.2` on an AVD) |
+
+If the emulator suite is already listening on ports 8080/9099, the script reuses it and leaves it running, so a long-lived instance in another terminal is never killed. Tunnels it creates are always removed on exit.
 
 ---
 

@@ -1,0 +1,74 @@
+rules_version = '2';
+
+// LiveVolume Cloud Firestore security rules.
+//
+// Deploy with:
+//   firebase deploy --only firestore:rules
+//
+// Without these rules a production Firestore database defaults to "deny all",
+// which is why the app must ship them alongside the client.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // ---------------------------------------------------------------------
+    // Discoverable LiveVolume profiles.
+    //
+    // Readable by every signed-in user so people can find each other by name
+    // or UID; writable only by its owner. Deliberately does NOT contain an
+    // address book — that lives under users/{uid}/contacts.
+    // ---------------------------------------------------------------------
+    match /directory/{uid} {
+      allow read: if signedIn();
+      allow create, update, delete: if isSelf(uid);
+    }
+
+    // ---------------------------------------------------------------------
+    // A user's private data: profile extras (e.g. FCM token) and address book.
+    // Never readable by anybody else.
+    // ---------------------------------------------------------------------
+    match /users/{uid} {
+      allow read, write: if isSelf(uid);
+
+      match /contacts/{contactId} {
+        allow read, write: if isSelf(uid);
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Call invites / ringing handshake. Only the two participants may create,
+    // read updates for, or tear down a call document.
+    // ---------------------------------------------------------------------
+    match /calls/{callId} {
+      allow create: if signedIn()
+        && request.resource.data.callerId == request.auth.uid;
+
+      allow read, update, delete: if signedIn()
+        && (
+          resource.data.callerId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Per-user copy of the local Room call history, so history can follow the
+    // account across devices. Scoped by ownerId.
+    // ---------------------------------------------------------------------
+    match /call_history/{docId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+
+      allow read, update, delete: if signedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Everything else is denied by default.
+  }
+}

@@ -36,12 +36,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FlipCameraIos
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material.icons.filled.CellTower
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -69,13 +73,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.CallHistoryRepository
 import com.example.data.repository.CallSignalingRepository
 import com.example.model.CallSessionState
-import com.example.model.DataRepository
 import com.example.ui.components.CallControlsOverlay
 import com.example.ui.components.LiveVolumeAvatar
 import com.example.ui.theme.LivePrimaryContainer
 import com.example.ui.theme.LiveSuccess
 import com.example.util.HapticType
 import com.example.util.HapticsManager
+import com.example.util.CallPermissions
 import com.example.util.InAppNotificationManager
 import com.example.util.InAppNotificationType
 import com.example.viewmodel.CallViewModel
@@ -91,7 +95,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 @Composable
 fun CallScreen(
-  callerName: String = "Live Contact",
+  callerName: String = "",
   channelName: String? = null,
   onEndCall: () -> Unit,
   modifier: Modifier = Modifier,
@@ -101,12 +105,23 @@ fun CallScreen(
   val elapsedDurationFormatted by viewModel.elapsedDurationFormatted.collectAsStateWithLifecycle()
 
   val context = LocalContext.current
+  val activity = context as? android.app.Activity
+  // Keep the screen on for the whole call (production: no mid-call sleep).
+  DisposableEffect(activity) {
+    activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    onDispose {
+      activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+  }
   LaunchedEffect(context) {
     viewModel.agoraManager.attachContext(context)
   }
   val callHistoryRepository = remember { CallHistoryRepository.getInstance(context) }
   val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
   val activeSession by signalingRepo.activeSession.collectAsStateWithLifecycle()
+
+  var showConfigureAgoraDialog by remember { mutableStateOf(!viewModel.agoraManager.isConfigured()) }
+  var inputAppId by remember { mutableStateOf("") }
 
   // Graceful camera & mic runtime permission handling (Phase 8)
   var hasCameraPermission by remember {
@@ -128,10 +143,24 @@ fun CallScreen(
   }
 
   LaunchedEffect(Unit) {
+    try {
+      androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context).get().unbindAll()
+    } catch (_: Exception) {}
     if (!hasCameraPermission || !hasMicPermission) {
-      permissionLauncher.launch(
-        arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-      )
+      permissionLauncher.launch(CallPermissions.CALL_FULL)
+    }
+  }
+
+  // Signaling heartbeat: lets the peer notice caller death even without presence.
+  LaunchedEffect(activeSession?.callId, activeSession?.state) {
+    val session = activeSession ?: return@LaunchedEffect
+    if (session.state == CallSessionState.RINGING || session.state == CallSessionState.CONNECTED) {
+      while (isActive) {
+        kotlinx.coroutines.delay(15_000L)
+        try {
+          signalingRepo.heartbeat()
+        } catch (_: Exception) {}
+      }
     }
   }
 
@@ -145,7 +174,8 @@ fun CallScreen(
   }
 
   // Local depth capture and 3D Point Cloud streaming to remote peer (Phase 6 & 8)
-  // Dynamic latency clamping: throttles capture if inference exceeds 100ms to keep UI thread silky smooth
+  // Dynamic latency clamping + adaptive network budget: throttles capture if
+  // inference exceeds 100ms AND backs off when RTC reports POOR/OFFLINE.
   LaunchedEffect(localSurfaceView, uiState.isCameraOn, hasCameraPermission) {
     val surface = localSurfaceView ?: return@LaunchedEffect
     if (!uiState.isCameraOn || !hasCameraPermission) return@LaunchedEffect
@@ -157,7 +187,22 @@ fun CallScreen(
 
     try {
       while (isActive) {
-        val baseDelay = 200L // 5 FPS nominal
+        // Adaptive interval from real network quality (200ms excellent -> 400ms poor).
+        val budgetInterval = try {
+          viewModel.volumetricBudget.value.intervalMs
+        } catch (_: Exception) {
+          200L
+        }
+        val paused = try {
+          viewModel.volumetricBudget.value.paused
+        } catch (_: Exception) {
+          false
+        }
+        if (paused) {
+          kotlinx.coroutines.delay(500L)
+          continue
+        }
+        val baseDelay = budgetInterval // adaptive nominal
         val dynamicDelay = if (lastInferenceDurationMs > 100L) {
           (lastInferenceDurationMs * 2L).coerceAtMost(1000L)
         } else {
@@ -267,16 +312,22 @@ fun CallScreen(
           }
         }
       } else if (uiState.remoteUid != null && !uiState.isRemoteVideoMuted) {
-        // Live remote video stream rendered directly from Agora RTC
+        // Live remote video stream rendered directly from Agora RTC.
+        // NOTE: update{} only re-binds when the UID actually changes — calling
+        // setupRemoteVideo on every recomposition caused flicker + native churn.
+        var boundUid by remember { mutableStateOf<Int?>(null) }
         AndroidView(
           factory = { ctx ->
             SurfaceView(ctx).apply {
               viewModel.agoraManager.setupRemoteVideo(this, uiState.remoteUid!!)
+              boundUid = uiState.remoteUid
             }
           },
           update = { surfaceView ->
-            uiState.remoteUid?.let { uid ->
+            val uid = uiState.remoteUid
+            if (uid != null && boundUid != uid) {
               viewModel.agoraManager.setupRemoteVideo(surfaceView, uid)
+              boundUid = uid
             }
           },
           modifier = Modifier.fillMaxSize()
@@ -302,8 +353,8 @@ fun CallScreen(
             verticalArrangement = Arrangement.Center
           ) {
             LiveVolumeAvatar(
-              avatarUrl = DataRepository.SARAH_AVATAR_URL,
-              initials = callerName.take(2).uppercase(),
+              avatarUrl = null,
+              initials = callerName.take(2).uppercase().ifBlank { "3D" },
               size = 92.dp,
               showOnlineBadge = false
             )
@@ -397,8 +448,8 @@ fun CallScreen(
           .testTag("persistent_call_duration_timer")
       ) {
         LiveVolumeAvatar(
-          avatarUrl = DataRepository.SARAH_AVATAR_URL,
-          initials = callerName.take(2).uppercase(),
+          avatarUrl = null,
+          initials = callerName.take(2).uppercase().ifBlank { "3D" },
           size = 32.dp,
           showOnlineBadge = false
         )
@@ -443,18 +494,38 @@ fun CallScreen(
           .clickable { viewModel.switchCamera() }
           .testTag("self_pip_window")
       ) {
-        if (uiState.isCameraOn) {
-          AndroidView(
-            factory = { ctx ->
-              SurfaceView(ctx).apply {
-                setZOrderMediaOverlay(true)
-                viewModel.agoraManager.setupLocalVideo(this)
-                localSurfaceView = this
-              }
-            },
-            modifier = Modifier.fillMaxSize()
-          )
-        } else {
+        if (uiState.isCameraOn && hasCameraPermission) {
+          if (viewModel.agoraManager.isConfigured()) {
+            // Bind the local canvas once; update{} only re-binds after
+            // camera toggle (isCameraOn flip) to avoid native re-registration churn.
+            var localBound by remember { mutableStateOf(false) }
+            AndroidView(
+              factory = { ctx ->
+                SurfaceView(ctx).apply {
+                  setZOrderMediaOverlay(true)
+                  viewModel.agoraManager.setupLocalVideo(this)
+                  localSurfaceView = this
+                  localBound = true
+                }
+              },
+              update = { surfaceView ->
+                localSurfaceView = surfaceView
+                if (!localBound) {
+                  viewModel.agoraManager.setupLocalVideo(surfaceView)
+                  localBound = true
+                }
+              },
+              modifier = Modifier.fillMaxSize()
+            )
+          } else {
+            // CameraX fallback: always shows self video preview even if Agora RTC is awaiting App ID
+            com.example.ui.components.CameraPreview(
+              isFrontCamera = uiState.isFrontCamera,
+              isCameraOn = uiState.isCameraOn,
+              modifier = Modifier.fillMaxSize()
+            )
+          }
+        } else if (!uiState.isCameraOn) {
           Box(
             modifier = Modifier
               .fillMaxSize()
@@ -581,7 +652,40 @@ fun CallScreen(
       )
     }
 
-    // 4. Graceful Permission Denial Card (Phase 8 Hardening)
+      // Agora App ID Alert Banner if unconfigured
+      if (!viewModel.agoraManager.isConfigured()) {
+        Box(
+          modifier = Modifier
+            .align(Alignment.TopCenter)
+            .statusBarsPadding()
+            .padding(top = 76.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .background(Color(0xFFE11D48).copy(alpha = 0.92f))
+            .clickable {
+              inputAppId = viewModel.agoraManager.getEffectiveAppId().let { if (it == "YOUR_AGORA_APP_ID") "" else it }
+              showConfigureAgoraDialog = true
+            }
+            .padding(horizontal = 14.dp, vertical = 7.dp)
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.CellTower,
+              contentDescription = null,
+              tint = Color.White,
+              modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = "Tap to enter Agora App ID for live streaming",
+              color = Color.White,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold
+            )
+          }
+        }
+      }
+
+      // 4. Graceful Permission Denial Card (Phase 8 Hardening)
     if (!hasCameraPermission || !hasMicPermission) {
       Box(
         modifier = Modifier
@@ -667,5 +771,53 @@ fun CallScreen(
       }
     }
   }
-}
 
+  if (showConfigureAgoraDialog) {
+    AlertDialog(
+      onDismissRequest = { showConfigureAgoraDialog = false },
+      title = { Text("Configure Agora RTC") },
+      text = {
+        Column {
+          Text(
+            text = "Enter your Agora App ID to enable real-time 3D volumetric point cloud and video streaming between devices:",
+            style = MaterialTheme.typography.bodyMedium
+          )
+          Spacer(modifier = Modifier.height(12.dp))
+          OutlinedTextField(
+            value = inputAppId,
+            onValueChange = { inputAppId = it.trim() },
+            label = { Text("Agora App ID") },
+            placeholder = { Text("e.g. 484a9e...") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "Obtain a free App ID at console.agora.io (Testing mode / No certificate needed)",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            if (inputAppId.isNotBlank()) {
+              viewModel.agoraManager.saveAppId(inputAppId)
+              viewModel.agoraManager.joinChannel(uiState.channelName.ifBlank { "livevolume_default" })
+            }
+            showConfigureAgoraDialog = false
+          },
+          enabled = inputAppId.isNotBlank()
+        ) {
+          Text("Save & Connect")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showConfigureAgoraDialog = false }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+}
