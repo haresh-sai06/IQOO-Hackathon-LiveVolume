@@ -55,16 +55,15 @@ import com.example.util.HapticsManager
 import kotlinx.coroutines.delay
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.random.Random
 
 data class StreamTelemetry(
-  val latency: Int = 24,
-  val fps: Int = 60,
-  val bitrate: Float = 18.4f,
-  val jitter: Float = 1.1f,
-  val meshQuality: String = "Optimal 3D",
-  val signalBars: Int = 4,
-  val connectionType: String = "5G Spatial"
+  val latency: Int = 0,
+  val fps: Int = 0,
+  val bitrate: Float = 0f,
+  val jitter: Float = 0f,
+  val meshQuality: String = "Waiting",
+  val signalBars: Int = 0,
+  val connectionType: String = "RTC"
 )
 
 /**
@@ -73,7 +72,7 @@ data class StreamTelemetry(
  */
 @Composable
 fun CallSignalLatencyMonitor(
-  latencyMs: Int = 24,
+  latencyMs: Int = -1,
   connectionQuality: Any? = null,
   connectionStatus: Any? = null,
   binauralActive: Boolean = true,
@@ -83,31 +82,37 @@ fun CallSignalLatencyMonitor(
   val context = LocalContext.current
   var isExpanded by remember { mutableStateOf(false) }
 
-  var telemetry by remember { mutableStateOf(StreamTelemetry()) }
-  val latencyHistory = remember { mutableStateListOf(23, 25, 24, 26, 22, 24, 25, 24) }
-
-  // Periodic natural telemetry variance
-  LaunchedEffect(Unit) {
-    while (true) {
-      delay(1800)
-      val delta = Random.nextInt(-2, 3)
-      val nextLatency = max(18, min(38, telemetry.latency + delta))
-      val nextBitrate = max(14.2f, min(22.5f, telemetry.bitrate + (Random.nextFloat() * 0.8f - 0.4f)))
-      val nextJitter = max(0.6f, min(2.4f, telemetry.jitter + (Random.nextFloat() * 0.4f - 0.2f)))
-
-      if (latencyHistory.size >= 10) {
-        latencyHistory.removeAt(0)
-      }
-      latencyHistory.add(nextLatency)
-
-      telemetry = telemetry.copy(
-        latency = nextLatency,
-        bitrate = String.format("%.1f", nextBitrate).toFloatOrNull() ?: nextBitrate,
-        jitter = String.format("%.1f", nextJitter).toFloatOrNull() ?: nextJitter,
-        fps = if (nextLatency > 34) 59 else 60,
-        meshQuality = if (nextLatency > 32) "High Fidelity" else "Optimal 3D"
+  // Honest telemetry only: use measured [latencyMs] when provided (>=0).
+  // Never invent sub-10ms or synthetic RTT for the HUD.
+  var telemetry by remember {
+    mutableStateOf(
+      StreamTelemetry(
+        latency = if (latencyMs >= 0) latencyMs else 0,
+        meshQuality = if (latencyMs >= 0) "Measured" else "Waiting"
       )
+    )
+  }
+  val latencyHistory = remember { mutableStateListOf<Int>() }
+
+  LaunchedEffect(latencyMs) {
+    if (latencyMs < 0) {
+      telemetry = telemetry.copy(latency = 0, meshQuality = "Waiting", fps = 0)
+      return@LaunchedEffect
     }
+    if (latencyHistory.size >= 10) latencyHistory.removeAt(0)
+    latencyHistory.add(latencyMs)
+    telemetry = telemetry.copy(
+      latency = latencyMs,
+      fps = 0, // FPS not measured here — do not fake 60
+      bitrate = 0f,
+      jitter = 0f,
+      meshQuality = when {
+        latencyMs <= 80 -> "Excellent link"
+        latencyMs <= 150 -> "Good link"
+        latencyMs <= 300 -> "Fair link"
+        else -> "Weak link"
+      }
+    )
   }
 
   val pulseAnim = rememberInfiniteTransition(label = "pulse")

@@ -38,4 +38,10 @@ interface CallHistoryDao {
 
   @Query("SELECT COUNT(*) FROM call_history")
   suspend fun getCount(): Int
+
+  @Query("DELETE FROM call_history WHERE LOWER(contactName) = 'live contact' OR LOWER(contactName) LIKE '%unknown%' OR contactName = '' OR avatarUrl LIKE '%DY-kuwHnfBauA9LWiDld3tkQs%'")
+  suspend fun deleteLegacyMockCalls()
+
+  @Query("DELETE FROM call_history WHERE LOWER(contactName) LIKE '%unknown%' OR LOWER(contactName) = 'live contact'")
+  suspend fun deleteUnknownCalls()
 }

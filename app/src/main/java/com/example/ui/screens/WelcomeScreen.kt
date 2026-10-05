@@ -43,7 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.model.DataRepository
+import com.example.model.AppContent
 import com.example.ui.components.SpatialOrbCanvas
 import com.example.ui.theme.LivePrimaryContainer
 
@@ -83,7 +83,7 @@ fun WelcomeScreen(
         contentAlignment = Alignment.Center
       ) {
         AsyncImage(
-          model = DataRepository.LOGO_URL,
+          model = AppContent.LOGO_URL,
           contentDescription = "LiveVolume Logo",
           modifier = Modifier.fillMaxSize()
         )

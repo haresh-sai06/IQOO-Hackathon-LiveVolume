@@ -4,8 +4,9 @@ import android.app.Application
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.call.AdaptiveVolumetricController
+import com.example.call.CallLifecycle
 import com.example.model.VolumetricMeshMode
-import com.example.service.AudioProcessingService
 import com.example.ui.theme.LiveError
 import com.example.ui.theme.LiveSuccess
 import com.example.util.AgoraManager
@@ -16,6 +17,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** Latency sentinel meaning "no RTC statistics received yet". */
+const val UNKNOWN_LATENCY_MS = -1
 
 /**
  * Connection states for real-time video call session.
@@ -38,18 +42,22 @@ enum class ConnectionQualityLevel(
   EXCELLENT("Excellent", LiveSuccess, 4),               // < 45ms (Green)
   GOOD("Good", Color(0xFF16A34A), 3),                   // 45 - 85ms (Light Green)
   MODERATE("Fair", Color(0xFFF59E0B), 2),               // 85 - 150ms (Amber/Yellow)
-  POOR("Poor", LiveError, 1)                            // > 150ms or Reconnecting (Red)
+  POOR("Poor", LiveError, 1)                            // > 150ms, unknown, or reconnecting (Red)
 }
 
 /**
  * Complete state representation for an ongoing video call with Agora RTC.
+ *
+ * All numeric telemetry starts at an explicit "unknown" value rather than a
+ * plausible-looking fabricated number, so the UI can never show fake link
+ * quality before the first real Agora statistics arrive.
  */
 data class CallUiState(
-  val callerName: String = "Live Contact",
+  val callerName: String = "",
   val channelName: String = "",
   val isMuted: Boolean = false,
   val isCameraOn: Boolean = true,
-  val connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED,
+  val connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED,
   val isFrontCamera: Boolean = true,
   val isSpeakerOn: Boolean = true,
   val is3DMode: Boolean = false,
@@ -57,47 +65,50 @@ data class CallUiState(
   val elapsedSeconds: Long = 0L,
   val cameraPermissionGranted: Boolean = false,
   val audioPermissionGranted: Boolean = false,
-  val latencyMs: Int = 22,
-  val connectionQuality: ConnectionQualityLevel = ConnectionQualityLevel.EXCELLENT,
-  val fps: Int = 60,
+  val latencyMs: Int = UNKNOWN_LATENCY_MS,
+  val connectionQuality: ConnectionQualityLevel = ConnectionQualityLevel.POOR,
   val remoteUid: Int? = null,
   val isRemoteVideoMuted: Boolean = false,
   val meshMode: VolumetricMeshMode = VolumetricMeshMode.HOLOGRAPHIC_MESH,
   val depthIntensity: Float = 1.0f,
   val isGyroTrackingEnabled: Boolean = false,
-  val audioLevel: Float = 0.25f,
+  val audioLevel: Float = 0f,
   val azimuth: Float = 0f,
-  val elevation: Float = 0f,
-  val showOpticsSheet: Boolean = false
+  val elevation: Float = 0f
 )
 
 class CallViewModel(application: Application) : AndroidViewModel(application) {
 
   val agoraManager = AgoraManager.getInstance(application)
 
+  /** Single source of truth for every call-screen value. */
   private val _uiState = MutableStateFlow(CallUiState())
   val uiState: StateFlow<CallUiState> = _uiState.asStateFlow()
 
-  // Direct accessible state flows
-  val isMuted: StateFlow<Boolean> = MutableStateFlow(false)
-  val isCameraOn: StateFlow<Boolean> = MutableStateFlow(true)
-  val connectionStatus: StateFlow<ConnectionStatus> = MutableStateFlow(ConnectionStatus.CONNECTED)
-  val latencyMs: StateFlow<Int> = MutableStateFlow(22)
-
-  // Coroutine-based elapsed call duration timer state flows
   private val _elapsedSeconds = MutableStateFlow(0L)
   val elapsedSeconds: StateFlow<Long> = _elapsedSeconds.asStateFlow()
-  val elapsedCallDuration: StateFlow<Long> = _elapsedSeconds.asStateFlow()
+
+  // Real network telemetry, sourced from Agora RtcStats via RtcConnectionMonitor.
+  private val _rttMs = MutableStateFlow(UNKNOWN_LATENCY_MS)
+  val rttMs: StateFlow<Int> = _rttMs.asStateFlow()
+
+  private val _packetLossPct = MutableStateFlow(0)
+  val packetLossPct: StateFlow<Int> = _packetLossPct.asStateFlow()
+
+  private val _callLifecycle = MutableStateFlow(CallLifecycle.IDLE)
+  val callLifecycle: StateFlow<CallLifecycle> = _callLifecycle.asStateFlow()
+
+  private val adaptiveController = AdaptiveVolumetricController()
+  val volumetricBudget: StateFlow<AdaptiveVolumetricController.Budget> =
+    adaptiveController.budget
 
   private val _elapsedDurationFormatted = MutableStateFlow("00:00")
   val elapsedDurationFormatted: StateFlow<String> = _elapsedDurationFormatted.asStateFlow()
 
   private var timerJob: Job? = null
-  private var latencySimJob: Job? = null
 
   init {
     startCallTimer()
-    startLatencyMonitoring()
 
     viewModelScope.launch {
       agoraManager.remoteUid.collect { uid ->
@@ -112,14 +123,51 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     viewModelScope.launch {
-      AudioProcessingService.sharedAudioLevel.collect { level ->
-        _uiState.update { it.copy(audioLevel = level) }
+      agoraManager.remotePointCloud.collect { pc ->
+        _uiState.update { it.copy(remotePointCloud = pc) }
       }
     }
 
+    // RTC lifecycle -> call banner status (CONNECTING/CONNECTED/RECONNECTING/...)
     viewModelScope.launch {
-      agoraManager.remotePointCloud.collect { pc ->
-        _uiState.update { it.copy(remotePointCloud = pc) }
+      agoraManager.lifecycle.collect { lc ->
+        _callLifecycle.value = lc
+        val status = when (lc) {
+          CallLifecycle.CONNECTING,
+          CallLifecycle.OUTGOING_RINGING,
+          CallLifecycle.INCOMING_RINGING -> ConnectionStatus.CONNECTING
+          CallLifecycle.CONNECTED -> ConnectionStatus.CONNECTED
+          CallLifecycle.RECONNECTING -> ConnectionStatus.RECONNECTING
+          CallLifecycle.ENDED,
+          CallLifecycle.IDLE -> ConnectionStatus.DISCONNECTED
+          CallLifecycle.FAILED -> ConnectionStatus.RECONNECTING
+        }
+        // Don't stomp an explicit ENDED after leaveChannel races with FAILED.
+        if (_uiState.value.connectionStatus != ConnectionStatus.DISCONNECTED ||
+          status != ConnectionStatus.RECONNECTING
+        ) {
+          setConnectionStatus(status)
+        }
+      }
+    }
+
+    // REAL network stats -> latency pill, quality bars, adaptive volumetric budget.
+    viewModelScope.launch {
+      agoraManager.connectionMonitor.snapshot.collect { snap ->
+        _rttMs.value = snap.rttMs
+        _packetLossPct.value = snap.worstLossPct
+        adaptiveController.onNetworkSnapshot(snap)
+        val budget = adaptiveController.budget.value
+        agoraManager.setVolumetricBudget(budget.maxPoints, budget.paused)
+        if (snap.rttMs >= 0) {
+          updateLatency(snap.rttMs)
+        }
+        // Prefer the remote Agora level when available; fall back to local mic meter.
+        val meter = if (snap.remoteAudioLevel > 0.01f) snap.remoteAudioLevel
+          else snap.localAudioLevel
+        if (meter > 0.01f) {
+          _uiState.update { it.copy(audioLevel = meter) }
+        }
       }
     }
   }
@@ -146,16 +194,16 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
       it.copy(
         callerName = callerName,
         channelName = channel,
-        connectionStatus = ConnectionStatus.CONNECTED,
+        connectionStatus = ConnectionStatus.CONNECTING,
         elapsedSeconds = 0L,
-        latencyMs = 24,
-        connectionQuality = ConnectionQualityLevel.EXCELLENT
+        latencyMs = UNKNOWN_LATENCY_MS,
+        connectionQuality = ConnectionQualityLevel.POOR
       )
     }
 
     agoraManager.joinChannel(channel)
+    com.example.service.CallForegroundService.start(getApplication(), callerName, true)
     startCallTimer()
-    startLatencyMonitoring()
   }
 
   /**
@@ -181,25 +229,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   /**
-   * Periodically monitors network ping.
+   * Real latency/quality update driven by Agora RtcStats (see RtcConnectionMonitor).
+   * Keeps the legacy ConnectionQualityLevel UI contract intact.
    */
-  private fun startLatencyMonitoring() {
-    latencySimJob?.cancel()
-    latencySimJob = viewModelScope.launch {
-      var counter = 0
-      while (true) {
-        delay(3500L)
-        counter++
-        if (_uiState.value.connectionStatus == ConnectionStatus.CONNECTED) {
-          val base = 22
-          val jitter = (counter % 5) * 3 - 6
-          val newLatency = (base + jitter).coerceIn(16, 45)
-          updateLatency(newLatency)
-        }
-      }
-    }
-  }
-
   fun updateLatency(latency: Int) {
     val quality = calculateQuality(latency, _uiState.value.connectionStatus)
     _uiState.update {
@@ -211,7 +243,10 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   private fun calculateQuality(latency: Int, status: ConnectionStatus): ConnectionQualityLevel {
-    if (status == ConnectionStatus.RECONNECTING || status == ConnectionStatus.DISCONNECTED) {
+    if (status == ConnectionStatus.RECONNECTING ||
+      status == ConnectionStatus.DISCONNECTED ||
+      latency < 0
+    ) {
       return ConnectionQualityLevel.POOR
     }
     return when {
@@ -277,8 +312,6 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         elevation = elevation
       )
     }
-    AudioProcessingService.sharedAzimuth.value = azimuth
-    AudioProcessingService.sharedElevation.value = elevation
   }
 
   fun updatePermissions(cameraGranted: Boolean, audioGranted: Boolean) {
@@ -295,8 +328,10 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
    */
   fun endCall(repository: com.example.data.local.CallHistoryRepository? = null) {
     timerJob?.cancel()
-    latencySimJob?.cancel()
     agoraManager.leaveChannel()
+    try {
+      com.example.service.CallForegroundService.stop(getApplication())
+    } catch (_: Exception) {}
 
     val finalSeconds = _uiState.value.elapsedSeconds
     val caller = _uiState.value.callerName
@@ -308,7 +343,10 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
       )
     }
 
-    if (repository != null && finalSeconds > 0) {
+    if (repository != null && finalSeconds > 0 && caller.isNotBlank() &&
+      !caller.contains("unknown", ignoreCase = true) &&
+      !caller.equals("Live Contact", ignoreCase = true)
+    ) {
       viewModelScope.launch {
         val mins = finalSeconds / 60
         val secs = finalSeconds % 60
@@ -316,10 +354,11 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         repository.insertCall(
           com.example.data.local.CallHistoryEntity(
             contactName = caller,
-            phoneNumber = "+1 (555) 234-5678",
-            avatarUrl = com.example.model.DataRepository.SARAH_AVATAR_URL,
-            initials = caller.take(2).uppercase(),
-            callType = "Live Video",
+            phoneNumber = if (caller.contains("@") || caller.startsWith("+")) caller
+              else "Room ${_uiState.value.channelName.ifBlank { "Direct" }}",
+            avatarUrl = null,
+            initials = caller.take(2).uppercase().ifBlank { "3D" },
+            callType = if (_uiState.value.is3DMode) "3D Volumetric" else "Live Video",
             direction = "Outgoing",
             durationSeconds = finalSeconds,
             durationFormatted = durationFormatted,
@@ -327,7 +366,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             timestampFormatted = "Just now",
             period = "TODAY",
             isOnline = true,
-            isSpatial = false,
+            isSpatial = _uiState.value.is3DMode,
             latencyMs = _uiState.value.latencyMs
           )
         )
@@ -339,6 +378,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     super.onCleared()
     agoraManager.leaveChannel()
     timerJob?.cancel()
-    latencySimJob?.cancel()
+    try {
+      com.example.service.CallForegroundService.stop(getApplication())
+    } catch (_: Exception) {}
   }
 }

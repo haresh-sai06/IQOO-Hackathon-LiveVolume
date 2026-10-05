@@ -138,7 +138,7 @@ class DepthEstimator(private val context: Context) {
   private val intValues = IntArray(256 * 256)
   private val rawPixelBuffer = IntArray(256 * 256)
   private val maskedPixelBuffer = IntArray(256 * 256)
-  private val pointCloudBuffer = FloatArray(16384 * 6)
+  private val pointCloudBuffer = FloatArray(22000 * 6)
 
   // ImageNet normalization constants for MiDaS
   private val mean = floatArrayOf(0.485f, 0.456f, 0.406f)
@@ -445,9 +445,10 @@ class DepthEstimator(private val context: Context) {
     }
 
     // 6. Generate 3D point cloud from masked depth & camera RGB (Phase 5 & 8)
+    // Denser stride when thermal fallback is OFF so the streamed bust looks fuller.
     var pointCount = 0
     val focalLength = 220f
-    val stride = if (isPerformanceFallbackEnabled) 3 else 2 // Dynamic performance fallback
+    val stride = if (isPerformanceFallbackEnabled) 3 else 1
 
     for (y in 0 until 256 step stride) {
       for (x in 0 until 256 step stride) {
@@ -461,9 +462,14 @@ class DepthEstimator(private val context: Context) {
         val worldZ = -z
 
         val pixel = intValues[idx]
-        val r = (pixel shr 16 and 0xFF) / 255.0f
-        val g = (pixel shr 8 and 0xFF) / 255.0f
-        val b = (pixel and 0xFF) / 255.0f
+        var r = (pixel shr 16 and 0xFF) / 255.0f
+        var g = (pixel shr 8 and 0xFF) / 255.0f
+        var b = (pixel and 0xFF) / 255.0f
+        // Mild saturation boost so skin/clothing RGB reads clearer in OpenGL
+        val luma = 0.299f * r + 0.587f * g + 0.114f * b
+        r = (luma + (r - luma) * 1.28f).coerceIn(0f, 1f)
+        g = (luma + (g - luma) * 1.28f).coerceIn(0f, 1f)
+        b = (luma + (b - luma) * 1.28f).coerceIn(0f, 1f)
 
         val base = pointCount * 6
         if (base + 5 < pointCloudBuffer.size) {

@@ -83,7 +83,9 @@ fun LiveVolumeApp() {
   val navController = rememberNavController()
   val context = LocalContext.current
   val signalingRepo = remember { CallSignalingRepository.getInstance(context) }
+  val contactsRepo = remember { com.example.data.repository.RealtimeContactsRepository.getInstance(context) }
   val incomingCall by signalingRepo.incomingCall.collectAsStateWithLifecycle()
+  val acceptedCall by signalingRepo.acceptedCall.collectAsStateWithLifecycle()
   val authRepository = remember { AuthRepository.getInstance(context) }
   val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
   val currentInAppNotification by InAppNotificationManager.currentNotification.collectAsStateWithLifecycle()
@@ -92,7 +94,21 @@ fun LiveVolumeApp() {
   // Automatically start listening for incoming call invites
   androidx.compose.runtime.LaunchedEffect(currentUser) {
     val myName = currentUser?.name ?: "Me"
-    signalingRepo.startListeningForIncomingCalls(myName)
+    val myId = currentUser?.id.orEmpty()
+    signalingRepo.startListeningForIncomingCalls(myName, myId)
+    // Bind contacts to this account: the private address book plus the
+    // discoverable directory of other LiveVolume users.
+    contactsRepo.start(myId)
+  }
+
+  // Route into the call screen whenever a call is answered — from the in-app
+  // dialog or from a notification's Answer action — then clear the event.
+  androidx.compose.runtime.LaunchedEffect(acceptedCall) {
+    val accepted = acceptedCall ?: return@LaunchedEffect
+    signalingRepo.consumeAcceptedCall()
+    navController.navigate(Screen.Call.createRoute(accepted.callerName, accepted.channelName)) {
+      launchSingleTop = true
+    }
   }
 
   Box(
@@ -140,14 +156,41 @@ fun LiveVolumeApp() {
 
     composable(Screen.Main.route) {
       MainShellScreen(
-        onStartCall = { callerName ->
-          val myName = currentUser?.name ?: "Me"
-          val session = signalingRepo.startCall(
-            callerName = myName,
-            receiverName = callerName
-          )
-          navController.navigate(Screen.Call.createRoute(callerName, session.channelName))
-        },
+          onStartCall = { callerName, customChannel ->
+            val myName = currentUser?.name ?: "Me"
+            val myId = currentUser?.id.orEmpty()
+            if (!customChannel.isNullOrBlank()) {
+              val target = contactsRepo.findContactByName(callerName)
+              if (target != null) {
+                try {
+                  signalingRepo.startCall(
+                    callerName = myName,
+                    receiverName = target.name,
+                    receiverId = target.registeredUserId ?: target.id,
+                    callerId = myId
+                  )
+                } catch (e: Exception) {
+                  // optional Firestore signaling
+                }
+              }
+              navController.navigate(Screen.Call.createRoute(callerName, customChannel))
+            } else {
+              val target = contactsRepo.findContactByName(callerName)
+              val channel = if (target != null) {
+                val session = signalingRepo.startCall(
+                  callerName = myName,
+                  receiverName = target.name,
+                  receiverId = target.registeredUserId ?: target.id,
+                  callerId = myId
+                )
+                session.channelName
+              } else {
+                val sanitized = callerName.lowercase().replace(Regex("[^a-z0-9]"), "").ifBlank { "room" }
+                "livevolume_$sanitized"
+              }
+              navController.navigate(Screen.Call.createRoute(callerName, channel))
+            }
+          },
         onOpenProfile = {
           navController.navigate(Screen.Profile.route)
         },
@@ -195,7 +238,7 @@ fun LiveVolumeApp() {
       arguments = listOf(
         navArgument("callerName") {
           type = NavType.StringType
-          defaultValue = "Live Contact"
+          defaultValue = "3D Live Room"
         },
         navArgument("channelName") {
           type = NavType.StringType
@@ -203,7 +246,7 @@ fun LiveVolumeApp() {
         }
       )
     ) { backStackEntry ->
-      val rawName = backStackEntry.arguments?.getString("callerName") ?: "Live Contact"
+      val rawName = backStackEntry.arguments?.getString("callerName") ?: "3D Live Room"
       val rawChannel = backStackEntry.arguments?.getString("channelName") ?: ""
       val callerName = try {
         java.net.URLDecoder.decode(rawName, "UTF-8")
@@ -313,10 +356,7 @@ fun LiveVolumeApp() {
       },
       confirmButton = {
         Button(
-          onClick = {
-            signalingRepo.acceptCall(call)
-            navController.navigate(Screen.Call.createRoute(call.callerName, call.channelName))
-          },
+          onClick = { signalingRepo.acceptCall(call) },
           colors = ButtonDefaults.buttonColors(containerColor = LivePrimaryContainer)
         ) {
           Text("Answer", fontWeight = FontWeight.Bold)
@@ -334,7 +374,7 @@ fun LiveVolumeApp() {
 
 @Composable
 fun MainShellScreen(
-  onStartCall: (callerName: String) -> Unit,
+  onStartCall: (callerName: String, channelName: String?) -> Unit,
   onOpenProfile: () -> Unit,
   onNavigateToGuides: () -> Unit,
   onNavigateToHelp: () -> Unit,
@@ -364,11 +404,11 @@ fun MainShellScreen(
           onStartCall = onStartCall
         )
         NavigationTab.CONTACTS -> ContactsScreen(
-          onStartCall = onStartCall,
+          onStartCall = { contactName -> onStartCall(contactName, null) },
           onOpenProfile = onOpenProfile
         )
         NavigationTab.HISTORY -> HistoryScreen(
-          onStartCall = onStartCall
+          onStartCall = { callerName -> onStartCall(callerName, null) }
         )
         NavigationTab.SETTINGS -> SettingsScreen(
           onNavigateToProfile = onOpenProfile,

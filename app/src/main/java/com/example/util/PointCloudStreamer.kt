@@ -16,6 +16,8 @@ object PointCloudStreamer {
   private const val MAGIC_HEADER: Short = 0x564C // "VL" for Volumetric Live
   private const val MAX_POINTS_PER_CHUNK = 120 // 120 pts * 8 bytes = 960 bytes payload
   private const val HEADER_SIZE = 8 // Magic(2) + FrameId(2) + ChunkIdx(1) + TotalChunks(1) + PointCount(2)
+  const val FRAME_TIMEOUT_MS = 350L // max wait for all chunks before dropping frame
+  const val MAX_CHUNKS_PER_FRAME = 64
 
   /**
    * Serializes a PointCloud into a list of chunked ByteArrays ready to be sent over Agora Data Stream.
@@ -24,15 +26,15 @@ object PointCloudStreamer {
    * @param frameId Monotonically increasing frame sequence number.
    * @param maxPoints Target number of transmitted points (downsamples evenly if pointCloud has more).
    */
-  fun serializeToChunks(pointCloud: PointCloud, frameId: Int, maxPoints: Int = 1200): List<ByteArray> {
+  fun serializeToChunks(pointCloud: PointCloud, frameId: Int, maxPoints: Int = 1500): List<ByteArray> {
     val totalAvailable = pointCloud.pointCount
     if (totalAvailable == 0) return emptyList()
 
     val targetCount = totalAvailable.coerceAtMost(maxPoints)
     val step = (totalAvailable.toFloat() / targetCount).coerceAtLeast(1.0f)
 
-    // Calculate total chunks needed
-    val totalChunks = ((targetCount + MAX_POINTS_PER_CHUNK - 1) / MAX_POINTS_PER_CHUNK).coerceIn(1, 255)
+    // Calculate total chunks needed (capped so Receiver never OOMs on corrupt header)
+    val totalChunks = ((targetCount + MAX_POINTS_PER_CHUNK - 1) / MAX_POINTS_PER_CHUNK).coerceIn(1, MAX_CHUNKS_PER_FRAME)
     val chunks = ArrayList<ByteArray>(totalChunks)
 
     val vertexData = pointCloud.vertexData
@@ -93,18 +95,34 @@ object PointCloudStreamer {
 
   /**
    * Stateful receiver for reassembling chunked packets into full PointCloud frames.
+   *
+   * Production hardening vs prototype:
+   * - Stale-frame eviction: if all chunks don't arrive within [FRAME_TIMEOUT_MS],
+   *   the partial frame is dropped so a single lost packet can't freeze the
+   *   hologram forever (previously `receivedChunks` grew unboundedly stale).
+   * - Late/duplicate frame guard: packets from an older frameId are ignored.
+   * - Telemetry: [framesAssembled], [framesDropped], [lastFrameAtMs] for HUD/debug.
    */
   class Receiver {
+    var framesAssembled: Long = 0L
+      private set
+    var framesDropped: Long = 0L
+      private set
+    var lastFrameAtMs: Long = 0L
+      private set
+
     private var currentFrameId: Int = -1
     private var expectedChunks: Int = 0
     private val receivedChunks = HashMap<Int, ByteArray>()
+    private var frameStartMs: Long = 0L
     private var lastAssemblyTime: Long = 0L
 
     /**
      * Processes an incoming raw packet. If all chunks for the frame have arrived,
      * reconstructs and returns the completed PointCloud, otherwise null.
      */
-    fun processPacket(packet: ByteArray): PointCloud? {
+    @Synchronized
+    fun processPacket(packet: ByteArray, nowMs: Long = System.currentTimeMillis()): PointCloud? {
       if (packet.size < HEADER_SIZE) return null
 
       val buffer = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN)
@@ -119,14 +137,38 @@ object PointCloudStreamer {
       val totalChunks = buffer.get().toInt() and 0xFF
       val pointsInChunk = buffer.short.toInt() and 0xFFFF
 
+      if (totalChunks <= 0 || totalChunks > 64 || pointsInChunk > MAX_POINTS_PER_CHUNK) {
+        Log.w(TAG, "dropping malformed chunk frame=$frameId idx=$chunkIdx total=$totalChunks pts=$pointsInChunk")
+        return null
+      }
+
       // New frame received
       if (frameId != currentFrameId) {
-        // Drop incomplete older frame
+        // Drop incomplete older frame (count it so HUD can show loss %)
+        if (expectedChunks > 0 && receivedChunks.size < expectedChunks) {
+          framesDropped++
+        }
+        // Ignore late packets from an already-superseded frameId window.
+        // FrameIds wrap at 16-bit; treat jumps > 1000 behind as stale.
+        if (currentFrameId != -1) {
+          val forwardDistance = (frameId - currentFrameId) and 0xFFFF
+          if (forwardDistance > 0xFFFF - 1000 && receivedChunks.isNotEmpty()) {
+            return null
+          }
+        }
         currentFrameId = frameId
         expectedChunks = totalChunks
         receivedChunks.clear()
+        frameStartMs = nowMs
+      } else if (expectedChunks > 0 && nowMs - frameStartMs > FRAME_TIMEOUT_MS) {
+        // Same frame still trickling in past the deadline -> drop & restart it.
+        framesDropped++
+        expectedChunks = totalChunks
+        receivedChunks.clear()
+        frameStartMs = nowMs
       }
 
+      if (chunkIdx >= expectedChunks) return null
       receivedChunks[chunkIdx] = packet
 
       // Check if all chunks for this frame have arrived
@@ -134,11 +176,25 @@ object PointCloudStreamer {
         val result = assembleFrame(expectedChunks)
         receivedChunks.clear()
         expectedChunks = 0
-        lastAssemblyTime = System.currentTimeMillis()
-        return result
+        lastAssemblyTime = nowMs
+        if (result != null) {
+          framesAssembled++
+          lastFrameAtMs = nowMs
+          return result
+        } else {
+          framesDropped++
+        }
       }
 
       return null
+    }
+
+    @Synchronized
+    fun reset() {
+      currentFrameId = -1
+      expectedChunks = 0
+      receivedChunks.clear()
+      frameStartMs = 0L
     }
 
     private fun assembleFrame(totalChunks: Int): PointCloud? {

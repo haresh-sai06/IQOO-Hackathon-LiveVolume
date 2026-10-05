@@ -26,6 +26,10 @@ android {
         ?: System.getenv("AGORA_APP_ID") 
         ?: "YOUR_AGORA_APP_ID"
     buildConfigField("String", "AGORA_APP_ID", "\"$agoraAppId\"")
+    val tokenServerUrl = project.findProperty("AGORA_TOKEN_SERVER_URL") as? String
+        ?: System.getenv("AGORA_TOKEN_SERVER_URL")
+        ?: "YOUR_TOKEN_SERVER_URL"
+    buildConfigField("String", "AGORA_TOKEN_SERVER_URL", "\"$tokenServerUrl\"")
   }
 
   signingConfigs {
@@ -109,7 +113,6 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Firebase Firestore & Auth:
   implementation(libs.firebase.firestore)
@@ -126,11 +129,7 @@ dependencies {
   implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
-  implementation(libs.okhttp)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -149,5 +148,4 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
 }

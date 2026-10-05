@@ -15,31 +15,39 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ml.PointCloud
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /**
- * Rebuilt Volumetric Visualizer (Phase 5).
- * Renders real-time 3D point cloud reconstructed from real masked depth and RGB video frames.
- * Supports smooth drag-to-orbit and pinch-to-zoom interactive touch controls.
- *
- * @param pointCloud Live 3D point cloud data generated from neural depth & silhouette segmentation.
- * @param modifier Compose layout modifier.
+ * Live 3D point-cloud viewer with drag-orbit, pinch-zoom, inertia, and optional
+ * Shared Presence desk grid (OpenGL preview — not ARCore world tracking).
  */
 @Composable
 fun VolumetricVisualizer(
   pointCloud: PointCloud?,
   modifier: Modifier = Modifier,
-  initialYaw: Float = 0f,
-  initialPitch: Float = 0f,
-  initialDistance: Float = 1.6f
+  initialYaw: Float = 18f,
+  initialPitch: Float = 12f,
+  initialDistance: Float = 1.85f,
+  sharedPresenceEnabled: Boolean = false,
+  surfaceFill: Boolean = true
 ) {
   var yaw by remember { mutableFloatStateOf(initialYaw) }
   var pitch by remember { mutableFloatStateOf(initialPitch) }
   var distance by remember { mutableFloatStateOf(initialDistance) }
+  var yawVelocity by remember { mutableFloatStateOf(0f) }
+  var pitchVelocity by remember { mutableFloatStateOf(0f) }
 
   val renderer = remember { PointCloudRenderer() }
   var glView by remember { mutableStateOf<GLSurfaceView?>(null) }
 
-  // Update renderer orbit angles whenever touch gesture state changes
+  LaunchedEffect(sharedPresenceEnabled, surfaceFill) {
+    renderer.sharedPresenceEnabled = sharedPresenceEnabled
+    renderer.surfaceFill = surfaceFill
+    renderer.pointSize = if (surfaceFill) 20f else 14f
+    glView?.requestRender()
+  }
+
   LaunchedEffect(yaw, pitch, distance) {
     renderer.rotationYaw = yaw
     renderer.rotationPitch = pitch
@@ -47,11 +55,34 @@ fun VolumetricVisualizer(
     glView?.requestRender()
   }
 
-  // Update renderer geometry whenever new point cloud frame is received
   LaunchedEffect(pointCloud) {
     pointCloud?.let { pc ->
       renderer.updatePointCloud(pc.vertexData, pc.pointCount)
+      // Slightly larger points when sparse so the bust still reads as solid
+      val densityBoost = when {
+        pc.pointCount < 400 -> 1.35f
+        pc.pointCount < 900 -> 1.15f
+        else -> 1.0f
+      }
+      renderer.pointSize = (if (surfaceFill) 20f else 14f) * densityBoost
       glView?.requestRender()
+    }
+  }
+
+  // Orbit inertia: keep spinning briefly after a fling-like drag
+  LaunchedEffect(Unit) {
+    while (isActive) {
+      delay(16L)
+      val vy = yawVelocity
+      val vp = pitchVelocity
+      if (kotlin.math.abs(vy) > 0.02f || kotlin.math.abs(vp) > 0.02f) {
+        yaw = (yaw + vy) % 360f
+        pitch = (pitch + vp).coerceIn(-85f, 85f)
+        yawVelocity = vy * 0.92f
+        pitchVelocity = vp * 0.92f
+        if (kotlin.math.abs(yawVelocity) < 0.02f) yawVelocity = 0f
+        if (kotlin.math.abs(pitchVelocity) < 0.02f) pitchVelocity = 0f
+      }
     }
   }
 
@@ -60,11 +91,13 @@ fun VolumetricVisualizer(
       .fillMaxSize()
       .pointerInput(Unit) {
         detectTransformGestures { _, pan, zoom, _ ->
-          // Drag-to-orbit: pan.x controls yaw, pan.y controls pitch
-          yaw = (yaw + pan.x * 0.4f) % 360f
-          pitch = (pitch - pan.y * 0.4f).coerceIn(-85f, 85f)
-          // Pinch-to-zoom: adjusts camera orbit radius
-          distance = (distance / zoom).coerceIn(0.6f, 3.8f)
+          val dyaw = pan.x * 0.42f
+          val dpitch = -pan.y * 0.42f
+          yaw = (yaw + dyaw) % 360f
+          pitch = (pitch + dpitch).coerceIn(-85f, 85f)
+          yawVelocity = dyaw * 0.55f
+          pitchVelocity = dpitch * 0.55f
+          distance = (distance / zoom).coerceIn(0.55f, 4.0f)
         }
       }
   ) {
@@ -72,8 +105,11 @@ fun VolumetricVisualizer(
       factory = { ctx ->
         GLSurfaceView(ctx).apply {
           setEGLContextClientVersion(2)
+          setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+          holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
           setRenderer(renderer)
-          renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+          // CONTINUOUSLY so inertia + live cloud frames keep painting smoothly
+          renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
           glView = this
         }
       },

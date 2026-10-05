@@ -1,0 +1,5 @@
+## Copy to local.properties (gitignored) and fill real values.
+sdk.dir=C:\\Users\\share\\AppData\\Local\\Android\\Sdk
+AGORA_APP_ID=YOUR_AGORA_APP_ID
+# Optional token server for Agora certificate mode:
+# AGORA_TOKEN_SERVER_URL=http://127.0.0.1:8080/rtc-token
