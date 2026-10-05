@@ -39,6 +39,10 @@ class AgoraManager private constructor(private var context: Context?) {
   private val _remotePointCloud = MutableStateFlow<com.example.ml.PointCloud?>(null)
   val remotePointCloud: StateFlow<com.example.ml.PointCloud?> = _remotePointCloud.asStateFlow()
 
+  /** Round-trip / last-mile delay from Agora RTC stats; -1 until first report. */
+  private val _rttMs = MutableStateFlow(-1)
+  val rttMs: StateFlow<Int> = _rttMs.asStateFlow()
+
   private var dataStreamId: Int = 0
   private var streamFrameId: Int = 0
   private val pointCloudReceiver = PointCloudStreamer.Receiver()
@@ -89,6 +93,18 @@ class AgoraManager private constructor(private var context: Context?) {
 
     override fun onError(err: Int) {
       Log.e(TAG, "Agora RTC error: $err")
+    }
+
+    override fun onRtcStats(stats: RtcStats?) {
+      if (stats == null) return
+      val measured = when {
+        stats.gatewayRtt > 0 -> stats.gatewayRtt
+        stats.lastmileDelay > 0 -> stats.lastmileDelay
+        else -> -1
+      }
+      if (measured > 0) {
+        _rttMs.value = measured
+      }
     }
   }
 
@@ -244,6 +260,7 @@ class AgoraManager private constructor(private var context: Context?) {
     } catch (e: Exception) {
       Log.w(TAG, "Error leaving channel: ${e.message}")
     }
+    _rttMs.value = -1
     _isJoined.value = false
     _remoteUid.value = null
     _remotePointCloud.value = null

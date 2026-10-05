@@ -94,7 +94,11 @@ fun ConnectionStrengthIcon(
         )
         Spacer(modifier = Modifier.width(4.dp))
         Text(
-          text = if (connectionStatus == ConnectionStatus.CONNECTED) "${latencyMs} ms" else connectionStatus.label,
+          text = when {
+            connectionStatus != ConnectionStatus.CONNECTED -> connectionStatus.label
+            latencyMs < 0 -> "Measuring…"
+            else -> "${latencyMs} ms"
+          },
           style = MaterialTheme.typography.labelSmall,
           fontWeight = FontWeight.Bold,
           color = animatedColor,

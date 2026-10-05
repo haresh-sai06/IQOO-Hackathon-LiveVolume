@@ -57,7 +57,7 @@ data class CallUiState(
   val elapsedSeconds: Long = 0L,
   val cameraPermissionGranted: Boolean = false,
   val audioPermissionGranted: Boolean = false,
-  val latencyMs: Int = 22,
+  val latencyMs: Int = -1,
   val connectionQuality: ConnectionQualityLevel = ConnectionQualityLevel.EXCELLENT,
   val fps: Int = 60,
   val remoteUid: Int? = null,
@@ -82,7 +82,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
   val isMuted: StateFlow<Boolean> = MutableStateFlow(false)
   val isCameraOn: StateFlow<Boolean> = MutableStateFlow(true)
   val connectionStatus: StateFlow<ConnectionStatus> = MutableStateFlow(ConnectionStatus.CONNECTED)
-  val latencyMs: StateFlow<Int> = MutableStateFlow(22)
+  val latencyMs: StateFlow<Int> = MutableStateFlow(-1)
 
   // Coroutine-based elapsed call duration timer state flows
   private val _elapsedSeconds = MutableStateFlow(0L)
@@ -93,7 +93,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
   val elapsedDurationFormatted: StateFlow<String> = _elapsedDurationFormatted.asStateFlow()
 
   private var timerJob: Job? = null
-  private var latencySimJob: Job? = null
+  private var latencyMonitorJob: Job? = null
 
   init {
     startCallTimer()
@@ -148,8 +148,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         channelName = channel,
         connectionStatus = ConnectionStatus.CONNECTED,
         elapsedSeconds = 0L,
-        latencyMs = 24,
-        connectionQuality = ConnectionQualityLevel.EXCELLENT
+        latencyMs = -1,
+        connectionQuality = ConnectionQualityLevel.GOOD
       )
     }
 
@@ -181,21 +181,14 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   /**
-   * Periodically monitors network ping.
+   * Collects real Agora RTC round-trip / last-mile delay (gatewayRtt or lastmileDelay).
+   * Shows -1 until the SDK reports the first stats sample.
    */
   private fun startLatencyMonitoring() {
-    latencySimJob?.cancel()
-    latencySimJob = viewModelScope.launch {
-      var counter = 0
-      while (true) {
-        delay(3500L)
-        counter++
-        if (_uiState.value.connectionStatus == ConnectionStatus.CONNECTED) {
-          val base = 22
-          val jitter = (counter % 5) * 3 - 6
-          val newLatency = (base + jitter).coerceIn(16, 45)
-          updateLatency(newLatency)
-        }
+    latencyMonitorJob?.cancel()
+    latencyMonitorJob = viewModelScope.launch {
+      agoraManager.rttMs.collect { rtt ->
+        updateLatency(rtt)
       }
     }
   }
@@ -213,6 +206,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
   private fun calculateQuality(latency: Int, status: ConnectionStatus): ConnectionQualityLevel {
     if (status == ConnectionStatus.RECONNECTING || status == ConnectionStatus.DISCONNECTED) {
       return ConnectionQualityLevel.POOR
+    }
+    if (latency < 0) {
+      return ConnectionQualityLevel.GOOD
     }
     return when {
       latency < 45 -> ConnectionQualityLevel.EXCELLENT
@@ -295,7 +291,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
    */
   fun endCall(repository: com.example.data.local.CallHistoryRepository? = null) {
     timerJob?.cancel()
-    latencySimJob?.cancel()
+    latencyMonitorJob?.cancel()
     agoraManager.leaveChannel()
 
     val finalSeconds = _uiState.value.elapsedSeconds
@@ -316,8 +312,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         repository.insertCall(
           com.example.data.local.CallHistoryEntity(
             contactName = caller,
-            phoneNumber = "+1 (555) 234-5678",
-            avatarUrl = com.example.model.DataRepository.SARAH_AVATAR_URL,
+            phoneNumber = "",
+            avatarUrl = null,
             initials = caller.take(2).uppercase(),
             callType = "Live Video",
             direction = "Outgoing",
@@ -339,6 +335,6 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     super.onCleared()
     agoraManager.leaveChannel()
     timerJob?.cancel()
-    latencySimJob?.cancel()
+    latencyMonitorJob?.cancel()
   }
 }
