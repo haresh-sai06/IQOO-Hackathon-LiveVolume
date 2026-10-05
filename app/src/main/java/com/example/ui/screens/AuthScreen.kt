@@ -1,4 +1,4 @@
-package com.example.ui.screens
+﻿package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -66,9 +66,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.data.repository.AuthRepository
-import com.example.model.AppContent
+import com.example.ui.components.LiveVolumeBrandMark
 import kotlinx.coroutines.launch
 
 @Composable
@@ -174,28 +173,19 @@ fun AuthScreen(
       ) {
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Single refined brand mark
-        Box(
-          modifier = Modifier
-            .size(54.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(
-              width = 1.dp,
-              color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-              shape = RoundedCornerShape(16.dp)
-            )
-            .padding(10.dp),
-          contentAlignment = Alignment.Center
-        ) {
-          AsyncImage(
-            model = AppContent.LOGO_URL,
-            contentDescription = "LiveVolume",
-            modifier = Modifier.fillMaxSize()
-          )
-        }
+        // Local Compose brand mark (no remote placeholder image)
+        LiveVolumeBrandMark(size = 64.dp, filled = true)
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+          text = "LiveVolume",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+          color = MaterialTheme.colorScheme.primary,
+          textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Clean typography header
         Text(
@@ -334,7 +324,7 @@ fun AuthScreen(
               onValueChange = { password = it },
               placeholder = {
                 Text(
-                  "••••••••",
+                  "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢",
                   color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                 )
               },

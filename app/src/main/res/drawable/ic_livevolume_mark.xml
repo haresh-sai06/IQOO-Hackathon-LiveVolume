@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Blue brand tile -->
+    <path
+        android:fillColor="#2563EB"
+        android:pathData="M18,18h72v72h-72z" />
+    <!-- Soft inner plate -->
+    <path
+        android:fillColor="#004AC6"
+        android:pathData="M26,26h56c4.4,0 8,3.6 8,8v56c0,4.4 -3.6,8 -8,8h-56c-4.4,0 -8,-3.6 -8,-8v-56c0,-4.4 3.6,-8 8,-8z"
+        android:fillAlpha="0.35" />
+    <!-- Head -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,40m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"
+        android:strokeWidth="3.5"
+        android:strokeColor="#FFFFFF" />
+    <!-- Torso -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M36,72 C38,56 44,52 54,52 C64,52 70,56 72,72"
+        android:strokeWidth="3.5"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round" />
+    <!-- Orbit -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M30,62 C26,52 34,44 48,42 C62,40 78,44 82,52 C86,60 76,70 62,72 C48,74 34,70 30,62 Z"
+        android:strokeWidth="2.8"
+        android:strokeColor="#93CCFF"
+        android:strokeLineCap="round" />
+    <!-- Satellite -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,48m-4.5,0a4.5,4.5 0,1 1,9 0a4.5,4.5 0,1 1,-9 0" />
+</vector>

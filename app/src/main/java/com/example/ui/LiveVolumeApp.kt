@@ -1,4 +1,4 @@
-package com.example.ui
+﻿package com.example.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -32,6 +32,7 @@ import com.example.ui.screens.PrivacyScreen
 import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.RecentsScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.WelcomeScreen
 
 import com.example.ui.components.DepthDebugPreviewScreen
@@ -59,6 +60,7 @@ import com.example.ui.theme.LivePrimaryContainer
 import com.example.util.InAppNotificationManager
 
 sealed class Screen(val route: String) {
+  data object Splash : Screen("splash")
   data object Welcome : Screen("welcome")
   data object Auth : Screen("auth")
   data object Main : Screen("main")
@@ -89,7 +91,8 @@ fun LiveVolumeApp() {
   val authRepository = remember { AuthRepository.getInstance(context) }
   val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
   val currentInAppNotification by InAppNotificationManager.currentNotification.collectAsStateWithLifecycle()
-  val startDestination = if (currentUser != null) Screen.Main.route else Screen.Auth.route
+  val postSplashDestination = if (currentUser != null) Screen.Main.route else Screen.Auth.route
+  val startDestination = Screen.Splash.route
 
   // Automatically start listening for incoming call invites
   androidx.compose.runtime.LaunchedEffect(currentUser) {
@@ -101,8 +104,8 @@ fun LiveVolumeApp() {
     contactsRepo.start(myId)
   }
 
-  // Route into the call screen whenever a call is answered — from the in-app
-  // dialog or from a notification's Answer action — then clear the event.
+  // Route into the call screen whenever a call is answered â€” from the in-app
+  // dialog or from a notification's Answer action â€” then clear the event.
   androidx.compose.runtime.LaunchedEffect(acceptedCall) {
     val accepted = acceptedCall ?: return@LaunchedEffect
     signalingRepo.consumeAcceptedCall()
@@ -121,6 +124,16 @@ fun LiveVolumeApp() {
       navController = navController,
       startDestination = startDestination
     ) {
+    composable(Screen.Splash.route) {
+      SplashScreen(
+        onFinished = {
+          navController.navigate(postSplashDestination) {
+            popUpTo(Screen.Splash.route) { inclusive = true }
+            launchSingleTop = true
+          }
+        }
+      )
+    }
     composable(Screen.Welcome.route) {
       WelcomeScreen(
         onGetStarted = {

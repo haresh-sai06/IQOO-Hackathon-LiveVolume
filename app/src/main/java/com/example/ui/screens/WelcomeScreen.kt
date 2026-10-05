@@ -42,8 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import com.example.model.AppContent
+import com.example.ui.components.LiveVolumeBrandMark
 import com.example.ui.components.SpatialOrbCanvas
 import com.example.ui.theme.LivePrimaryContainer
 
@@ -73,21 +72,8 @@ fun WelcomeScreen(
         .fillMaxWidth()
         .padding(top = 8.dp, bottom = 16.dp)
     ) {
-      Box(
-        modifier = Modifier
-          .size(56.dp)
-          .clip(RoundedCornerShape(16.dp))
-          .background(Color.White)
-          .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(16.dp))
-          .padding(8.dp),
-        contentAlignment = Alignment.Center
-      ) {
-        AsyncImage(
-          model = AppContent.LOGO_URL,
-          contentDescription = "LiveVolume Logo",
-          modifier = Modifier.fillMaxSize()
-        )
-      }
+      LiveVolumeBrandMark(size = 56.dp, filled = true)
+
 
       Spacer(modifier = Modifier.height(12.dp))
 

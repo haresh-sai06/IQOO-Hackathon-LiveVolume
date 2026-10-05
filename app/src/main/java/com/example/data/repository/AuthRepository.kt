@@ -264,22 +264,45 @@ class AuthRepository private constructor(private val context: Context) {
     "LiveVolume is not connected to its backend. Add app/google-services.json and rebuild."
   )
 
-  private fun friendlyAuthError(e: Exception, isRegister: Boolean): Exception = when (e) {
-    is FirebaseAuthInvalidCredentialsException ->
-      IllegalArgumentException("Incorrect email or password. Please try again.")
-    is FirebaseAuthInvalidUserException ->
-      IllegalArgumentException("No LiveVolume account exists for that email address.")
-    is FirebaseAuthUserCollisionException ->
-      IllegalArgumentException("An account already exists for that email address.")
-    is FirebaseAuthWeakPasswordException ->
-      IllegalArgumentException("Please choose a password with at least 6 characters.")
-    else -> IllegalStateException(
-      e.localizedMessage ?: if (isRegister) {
-        "Could not create your account. Check your connection and try again."
-      } else {
-        "Sign-in failed. Check your connection and try again."
-      }
-    )
+  private fun friendlyAuthError(e: Exception, isRegister: Boolean): Exception {
+    val detail = buildString {
+      append(e.message.orEmpty())
+      append(' ')
+      append(e.localizedMessage.orEmpty())
+      append(' ')
+      append(e.cause?.message.orEmpty())
+    }
+    val looksLikeMissingAuthConfig =
+      detail.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
+        detail.contains("CONFIGURATION_NOT_FOUND".lowercase()) ||
+        (detail.contains("internal error", ignoreCase = true) &&
+          detail.contains("configuration", ignoreCase = true))
+
+    if (looksLikeMissingAuthConfig) {
+      return IllegalStateException(
+        "Email/Password sign-in is not enabled for this Firebase project. " +
+          "In Firebase Console open project livevolume-iqoo-8f3a → Authentication → " +
+          "Sign-in method → enable Email/Password → Save, then try again."
+      )
+    }
+
+    return when (e) {
+      is FirebaseAuthInvalidCredentialsException ->
+        IllegalArgumentException("Incorrect email or password. Please try again.")
+      is FirebaseAuthInvalidUserException ->
+        IllegalArgumentException("No LiveVolume account exists for that email address.")
+      is FirebaseAuthUserCollisionException ->
+        IllegalArgumentException("An account already exists for that email address.")
+      is FirebaseAuthWeakPasswordException ->
+        IllegalArgumentException("Please choose a password with at least 6 characters.")
+      else -> IllegalStateException(
+        e.localizedMessage ?: if (isRegister) {
+          "Could not create your account. Check your connection and try again."
+        } else {
+          "Sign-in failed. Check your connection and try again."
+        }
+      )
+    }
   }
 
   companion object {
