@@ -49,7 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.DataRepository
+import com.example.model.AppContent
 import com.example.ui.theme.LivePrimaryContainer
 import com.example.ui.theme.LiveSuccess
 
@@ -183,9 +183,9 @@ fun PrivacyScreen(
 
       PrivacyPillarCard(
         icon = Icons.Default.Lock,
-        title = "End-to-End Encrypted Calls",
-        tag = "AES-256",
-        desc = "Live volumetric point cloud streams and binaural audio packets are cryptographically sealed. Only you and your caller hold decryption keys."
+        title = "Encrypted Media Transport",
+        tag = "Agora",
+        desc = "Audio, video, and volumetric point-cloud packets travel over Agora RTC with transport encryption. This is not custom end-to-end encryption where only you hold private keys."
       )
 
       PrivacyPillarCard(
@@ -212,7 +212,7 @@ fun PrivacyScreen(
       modifier = Modifier.fillMaxWidth(),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      DataRepository.privacySections.forEach { section ->
+      AppContent.privacySections.forEach { section ->
         val isExpanded = expandedSections[section.number] == true
         Box(
           modifier = Modifier

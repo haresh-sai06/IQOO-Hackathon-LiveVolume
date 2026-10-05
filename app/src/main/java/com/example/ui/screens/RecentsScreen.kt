@@ -63,7 +63,6 @@ import com.example.model.CallDirection
 import com.example.model.CallPeriod
 import com.example.model.CallRecord
 import com.example.model.CallType
-import com.example.model.DataRepository
 import com.example.ui.components.CameraPermissionRequestFlow
 import com.example.ui.components.CameraPreview
 import com.example.ui.components.LiveVolumeAvatar
@@ -74,48 +73,63 @@ import com.example.util.AudioPermissionHelper
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.CallHistoryRepository
+import com.example.data.repository.AuthRepository
+import com.example.data.repository.RealtimeContactsRepository
+import com.example.ui.components.DirectCallDialog
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun RecentsScreen(
-  onStartCall: (callerName: String) -> Unit,
+  onStartCall: (callerName: String, channelName: String?) -> Unit,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
+  val authRepository = remember { AuthRepository.getInstance(context) }
+  val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
+  val contactsRepository = remember { RealtimeContactsRepository.getInstance(context) }
+  val allContacts by contactsRepository.contactsFlow.collectAsStateWithLifecycle()
+
   val callHistoryRepository = remember { CallHistoryRepository.getInstance(context) }
   val roomRecords by callHistoryRepository.allCallHistory.collectAsStateWithLifecycle(initialValue = emptyList())
 
+  var showDirectCallDialog by remember { mutableStateOf(false) }
+
   val effectiveCallRecords = remember(roomRecords) {
     if (roomRecords.isNotEmpty()) {
-      roomRecords.map { entity ->
-        val callType = when {
-          entity.callType.contains("3D", ignoreCase = true) || entity.isSpatial -> CallType.SPATIAL_3D
-          entity.callType.contains("Missed", ignoreCase = true) || entity.direction.contains("Missed", ignoreCase = true) -> CallType.MISSED
-          entity.callType.contains("Video", ignoreCase = true) -> CallType.VIDEO
-          else -> CallType.AUDIO
+      roomRecords
+        .filter { !it.contactName.equals("Live Contact", ignoreCase = true) }
+        .filter { !it.contactName.contains("unknown", ignoreCase = true) }
+        .filter { it.contactName.isNotBlank() }
+        .map { entity ->
+          val callType = when {
+            entity.callType.contains("3D", ignoreCase = true) || entity.isSpatial -> CallType.SPATIAL_3D
+            entity.callType.contains("Missed", ignoreCase = true) || entity.direction.contains("Missed", ignoreCase = true) -> CallType.MISSED
+            entity.callType.contains("Video", ignoreCase = true) -> CallType.VIDEO
+            else -> CallType.AUDIO
+          }
+          val direction = when {
+            entity.direction.contains("Incoming", ignoreCase = true) -> CallDirection.INCOMING
+            entity.direction.contains("Missed", ignoreCase = true) -> CallDirection.MISSED
+            else -> CallDirection.OUTGOING
+          }
+          val period = when (entity.period.uppercase()) {
+            "YESTERDAY" -> CallPeriod.YESTERDAY
+            "EARLIER_THIS_WEEK" -> CallPeriod.EARLIER_THIS_WEEK
+            else -> CallPeriod.TODAY
+          }
+          CallRecord(
+            id = "call_${entity.id}",
+            contactName = entity.contactName,
+            initials = entity.initials,
+            avatarUrl = entity.avatarUrl,
+            callType = callType,
+            direction = direction,
+            duration = entity.durationFormatted,
+            timestamp = entity.timestampFormatted,
+            period = period,
+            isOnline = entity.isOnline
+          )
         }
-        val direction = when {
-          entity.direction.contains("Incoming", ignoreCase = true) -> CallDirection.INCOMING
-          entity.direction.contains("Missed", ignoreCase = true) -> CallDirection.MISSED
-          else -> CallDirection.OUTGOING
-        }
-        val period = when (entity.period.uppercase()) {
-          "YESTERDAY" -> CallPeriod.YESTERDAY
-          "EARLIER_THIS_WEEK" -> CallPeriod.EARLIER_THIS_WEEK
-          else -> CallPeriod.TODAY
-        }
-        CallRecord(
-          id = "call_${entity.id}",
-          contactName = entity.contactName,
-          initials = entity.initials,
-          avatarUrl = entity.avatarUrl,
-          callType = callType,
-          direction = direction,
-          duration = entity.durationFormatted,
-          timestamp = entity.timestampFormatted,
-          period = period,
-          isOnline = entity.isOnline
-        )
-      }
     } else {
       emptyList()
     }
@@ -147,6 +161,25 @@ fun RecentsScreen(
   val yesterdayCalls = filteredCalls.filter { it.period == CallPeriod.YESTERDAY }
   val earlierCalls = filteredCalls.filter { it.period == CallPeriod.EARLIER_THIS_WEEK }
 
+  val handleStartCall: (String, String?) -> Unit = { callerName, customChannel ->
+    isCameraOn = false
+    try {
+      androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context).get().unbindAll()
+    } catch (_: Exception) {}
+    onStartCall(callerName, customChannel)
+  }
+
+  if (showDirectCallDialog) {
+    DirectCallDialog(
+      currentUser = currentUser,
+      contacts = allContacts,
+      onDismiss = { showDirectCallDialog = false },
+      onLaunchCall = { displayName, channelName ->
+        handleStartCall(displayName, channelName)
+      }
+    )
+  }
+
   Column(
     modifier = modifier
       .fillMaxSize()
@@ -168,7 +201,7 @@ fun RecentsScreen(
       )
 
       IconButton(
-        onClick = { onStartCall(effectiveCallRecords.firstOrNull()?.contactName ?: "Live Contact") },
+        onClick = { showDirectCallDialog = true },
         modifier = Modifier
           .size(40.dp)
           .clip(CircleShape)
@@ -416,7 +449,7 @@ fun RecentsScreen(
 
               // Quick Connect Button
               Button(
-                onClick = { onStartCall(effectiveCallRecords.firstOrNull()?.contactName ?: "Live Contact") },
+                onClick = { showDirectCallDialog = true },
                 modifier = Modifier
                   .height(38.dp)
                   .testTag("start_spatial_call_button"),
@@ -443,6 +476,47 @@ fun RecentsScreen(
         Spacer(modifier = Modifier.height(14.dp))
       }
 
+      if (filteredCalls.isEmpty()) {
+        item {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(vertical = 32.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Box(
+                modifier = Modifier
+                  .size(64.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFFF1F5F9)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Default.ViewInAr,
+                  contentDescription = null,
+                  tint = LivePrimaryContainer,
+                  modifier = Modifier.size(32.dp)
+                )
+              }
+              Spacer(modifier = Modifier.height(12.dp))
+              Text(
+                text = if (searchQuery.isNotEmpty()) "No matching calls" else "No calls yet",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+              )
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(
+                text = if (searchQuery.isNotEmpty()) "Try a different search term" else "Tap 'Launch 3D Call' to connect via Room Code or Contact",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+          }
+        }
+      }
+
       if (todayCalls.isNotEmpty()) {
         item {
           PeriodHeader(title = "TODAY")
@@ -450,7 +524,7 @@ fun RecentsScreen(
         items(todayCalls) { call ->
           CallRecordRow(
             call = call,
-            onCallClick = { onStartCall(call.contactName) }
+            onCallClick = { handleStartCall(call.contactName, null) }
           )
           Spacer(modifier = Modifier.height(8.dp))
         }
@@ -463,7 +537,7 @@ fun RecentsScreen(
         items(yesterdayCalls) { call ->
           CallRecordRow(
             call = call,
-            onCallClick = { onStartCall(call.contactName) }
+            onCallClick = { handleStartCall(call.contactName, null) }
           )
           Spacer(modifier = Modifier.height(8.dp))
         }
@@ -476,7 +550,7 @@ fun RecentsScreen(
         items(earlierCalls) { call ->
           CallRecordRow(
             call = call,
-            onCallClick = { onStartCall(call.contactName) }
+            onCallClick = { handleStartCall(call.contactName, null) }
           )
           Spacer(modifier = Modifier.height(8.dp))
         }
@@ -523,8 +597,8 @@ private fun CallRecordRow(
       modifier = Modifier.weight(1f)
     ) {
       LiveVolumeAvatar(
-        avatarUrl = call.avatarUrl,
-        initials = call.contactName.take(2).uppercase(),
+        avatarUrl = null,
+        initials = call.contactName.take(2).uppercase().ifBlank { "3D" },
         size = 46.dp,
         showOnlineBadge = call.isOnline
       )

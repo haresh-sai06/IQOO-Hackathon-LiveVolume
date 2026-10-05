@@ -57,13 +57,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.repository.AuthRepository
-import com.example.model.DataRepository
 import com.example.ui.components.LiveVolumeAvatar
 import com.example.ui.theme.LiveError
 import com.example.ui.theme.LivePrimaryContainer
+import com.example.util.AgoraManager
 import com.example.util.HapticType
 import com.example.util.HapticsManager
 
@@ -84,11 +88,19 @@ fun SettingsScreen(
   val context = LocalContext.current
   val authRepository = remember { AuthRepository.getInstance(context) }
   val currentUser by authRepository.currentUser.collectAsStateWithLifecycle()
+  val agoraManager = remember { AgoraManager.getInstance(context) }
 
   var optimizeMobileData by remember { mutableStateOf(false) }
   var videoQuality by remember { mutableStateOf("Auto (1080p HD)") }
   var spatialQuality by remember { mutableStateOf("High Volumetric Depth") }
   var showQualityDialog by remember { mutableStateOf(false) }
+
+  var showAgoraDialog by remember { mutableStateOf(false) }
+  var showBackendInfoDialog by remember { mutableStateOf(false) }
+  var editedAgoraAppId by remember {
+    mutableStateOf(agoraManager.getEffectiveAppId().let { if (it == "YOUR_AGORA_APP_ID") "" else it })
+  }
+  var currentAgoraAppId by remember { mutableStateOf(agoraManager.getEffectiveAppId()) }
 
   val scrollState = rememberScrollState()
 
@@ -314,6 +326,50 @@ fun SettingsScreen(
 
     Spacer(modifier = Modifier.height(24.dp))
 
+    // Section: BACKEND & REAL-TIME STREAMING
+    SettingsSectionTitle("BACKEND & REAL-TIME STREAMING")
+
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(18.dp))
+        .background(Color.White)
+        .border(1.dp, Color(0xFFE2E7FF), RoundedCornerShape(18.dp))
+    ) {
+      val isConfigured = agoraManager.isConfigured()
+      val effectiveAppId = currentAgoraAppId
+      val displayAppId = if (isConfigured) {
+        if (effectiveAppId.length > 8) "${effectiveAppId.take(4)}••••${effectiveAppId.takeLast(4)} (Active)" else "$effectiveAppId (Active)"
+      } else {
+        "Tap to configure (Required for 2-way calls)"
+      }
+
+      val backendConfigured = authRepository.isBackendConfigured
+
+      SettingsRow(
+        icon = if (backendConfigured) Icons.Default.CheckCircle else Icons.Default.Info,
+        title = "Firebase Backend",
+        subtitle = if (backendConfigured) {
+          "Auth • Firestore signaling • Push — connected"
+        } else {
+          "Not connected — add app/google-services.json"
+        },
+        onClick = { showBackendInfoDialog = true }
+      )
+
+      SettingsRow(
+        icon = if (isConfigured) Icons.Default.CheckCircle else Icons.Default.Info,
+        title = "Agora RTC App ID",
+        subtitle = displayAppId,
+        onClick = {
+          editedAgoraAppId = agoraManager.getEffectiveAppId().let { if (it == "YOUR_AGORA_APP_ID") "" else it }
+          showAgoraDialog = true
+        }
+      )
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+
     // Section 2: PREFERENCES & PRIVACY
     SettingsSectionTitle("PREFERENCES & PRIVACY")
 
@@ -466,6 +522,75 @@ fun SettingsScreen(
         }
       }
     }
+  }
+
+  // Backend configuration help dialog
+  if (showBackendInfoDialog) {
+    AlertDialog(
+      onDismissRequest = { showBackendInfoDialog = false },
+      title = { Text("Connect the LiveVolume backend", fontWeight = FontWeight.Bold) },
+      text = {
+        Text(
+          "Accounts, contact discovery, call ringing and push notifications run on Firebase.\n\n" +
+            "1. Create a Firebase project.\n" +
+            "2. Enable Email/Password Auth, Cloud Firestore and Cloud Messaging.\n" +
+            "3. Drop the generated google-services.json into app/ and rebuild.\n\n" +
+            "Current status: " +
+            if (authRepository.isBackendConfigured) "connected" else "not connected",
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      },
+      confirmButton = {
+        TextButton(onClick = { showBackendInfoDialog = false }) { Text("Close") }
+      }
+    )
+  }
+
+  // Agora App ID Configuration Dialog
+  if (showAgoraDialog) {
+    AlertDialog(
+      onDismissRequest = { showAgoraDialog = false },
+      title = {
+        Text("Configure Agora App ID", fontWeight = FontWeight.Bold)
+      },
+      text = {
+        Column {
+          Text(
+            "To enable live two-way video, audio, and 3D point cloud streaming between physical devices, enter your Agora App ID (from console.agora.io):",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+          Spacer(modifier = Modifier.height(14.dp))
+          OutlinedTextField(
+            value = editedAgoraAppId,
+            onValueChange = { editedAgoraAppId = it.trim() },
+            placeholder = { Text("e.g. 1a2b3c4d5e6f...") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            agoraManager.saveAppId(editedAgoraAppId)
+            currentAgoraAppId = agoraManager.getEffectiveAppId()
+            showAgoraDialog = false
+            Toast.makeText(context, "Agora App ID saved and applied!", Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = LivePrimaryContainer)
+        ) {
+          Text("Save & Apply")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showAgoraDialog = false }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 }
 

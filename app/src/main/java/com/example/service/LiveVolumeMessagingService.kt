@@ -33,6 +33,14 @@ class LiveVolumeMessagingService : FirebaseMessagingService() {
       return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .getString(KEY_FCM_TOKEN, null)
     }
+
+    /** Dismisses the ringing notification once the user answers/declines elsewhere. */
+    fun cancelIncomingCallNotification(context: Context, callId: String) {
+      try {
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+          .cancel(callId.hashCode())
+      } catch (_: Exception) {}
+    }
   }
 
   override fun onNewToken(token: String) {
@@ -42,6 +50,14 @@ class LiveVolumeMessagingService : FirebaseMessagingService() {
       .edit()
       .putString(KEY_FCM_TOKEN, token)
       .apply()
+    // Sync to Firestore so a token server / Cloud Function can target this device.
+    try {
+      val repo = com.example.data.repository.CallSignalingRepository.getInstance(applicationContext)
+      val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+      if (uid.isNotBlank()) repo.syncFcmToken(uid, token)
+    } catch (e: Exception) {
+      Log.w(TAG, "FCM token sync skipped: ${e.message}")
+    }
   }
 
   override fun onMessageReceived(remoteMessage: RemoteMessage) {
@@ -51,7 +67,7 @@ class LiveVolumeMessagingService : FirebaseMessagingService() {
     val data = remoteMessage.data
     val channelName = data["channelName"] ?: ""
     val callId = data["callId"] ?: "call_${System.currentTimeMillis()}"
-    val callerName = data["callerName"] ?: data["title"] ?: "Live Contact"
+    val callerName = data["callerName"] ?: data["title"] ?: "LiveVolume Peer"
     val isCallInvite = data["type"] == "call_invite" || channelName.isNotBlank() ||
         remoteMessage.notification?.title?.contains("call", ignoreCase = true) == true
 
@@ -119,11 +135,29 @@ class LiveVolumeMessagingService : FirebaseMessagingService() {
       ).apply {
         description = "High-priority ringing alerts for incoming video calls"
         enableVibration(true)
+        vibrationPattern = longArrayOf(0, 500, 250, 500)
+        lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
       }
       notificationManager.createNotificationChannel(channel)
     }
 
-    // Answer Intent
+    // Full-screen intent: shows the incoming-call UI even on the lock screen
+    // (requires USE_FULL_SCREEN_INTENT on Android 14+).
+    val fullScreenIntent = Intent(this, MainActivity::class.java).apply {
+      action = ACTION_ANSWER_CALL
+      flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+      putExtra(EXTRA_CALL_ID, callId)
+      putExtra(EXTRA_CALLER_NAME, callerName)
+      putExtra(EXTRA_CHANNEL_NAME, channelName)
+    }
+    val fullScreenPi = PendingIntent.getActivity(
+      this,
+      100,
+      fullScreenIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    // Answer Intent (unique requestCode per callId so concurrent invites don't collide)
     val answerIntent = Intent(this, MainActivity::class.java).apply {
       action = ACTION_ANSWER_CALL
       flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -133,12 +167,12 @@ class LiveVolumeMessagingService : FirebaseMessagingService() {
     }
     val answerPendingIntent = PendingIntent.getActivity(
       this,
-      101,
+      1000 + (callId.hashCode() and 0x7FFF),
       answerIntent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    // Decline Intent
+    // Decline Intent (also dismisses the ringing notification via service hook)
     val declineIntent = Intent(this, MainActivity::class.java).apply {
       action = ACTION_DECLINE_CALL
       flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -146,7 +180,7 @@ class LiveVolumeMessagingService : FirebaseMessagingService() {
     }
     val declinePendingIntent = PendingIntent.getActivity(
       this,
-      102,
+      2000 + (callId.hashCode() and 0x7FFF),
       declineIntent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
@@ -158,6 +192,8 @@ class LiveVolumeMessagingService : FirebaseMessagingService() {
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setAutoCancel(true)
+      .setOngoing(true)
+      .setFullScreenIntent(fullScreenPi, true)
       .setContentIntent(answerPendingIntent)
       .addAction(android.R.drawable.ic_menu_call, "Answer", answerPendingIntent)
       .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePendingIntent)

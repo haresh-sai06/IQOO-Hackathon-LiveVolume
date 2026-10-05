@@ -16,3 +16,22 @@
 local.properties
 .env
 debug.keystore
+
+# Firebase project configuration (API keys / project identifiers).
+# See README "Configure the backend" for how to supply it locally.
+app/google-services.json
+
+# Reference Agora token server
+server/.env
+server/node_modules/
+
+# Firebase emulator suite scratch output (see README "Testing").
+# Running `scripts/verify-call-signaling.sh` drops these in the repository root.
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+firebase/emulator-data/
+
+# Local scratch
+.freebuff/
+

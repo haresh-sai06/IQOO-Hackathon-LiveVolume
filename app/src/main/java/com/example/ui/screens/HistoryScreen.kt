@@ -73,6 +73,9 @@ import com.example.ui.theme.LiveSuccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+/** Sentinel for "no measured latency yet" — never display a guessed ping. */
+private const val UNKNOWN_PING_MS = -1
+
 /**
  * History Page displaying persisted call records from Room database with
  * name-based search filtering using a MutableState list.
@@ -101,8 +104,12 @@ fun HistoryScreen(
   LaunchedEffect(roomCallHistory, searchQuery, selectedFilter) {
     filteredCallRecords.clear()
     val query = searchQuery.trim()
-    val filtered = roomCallHistory.filter { call ->
-      val matchesSearch = query.isEmpty() || call.contactName.contains(query, ignoreCase = true)
+    val filtered = roomCallHistory
+      .filter { !it.contactName.equals("Live Contact", ignoreCase = true) }
+      .filter { !it.contactName.contains("unknown", ignoreCase = true) }
+      .filter { it.contactName.isNotBlank() }
+      .filter { call ->
+        val matchesSearch = query.isEmpty() || call.contactName.contains(query, ignoreCase = true)
       val matchesFilter = when (selectedFilter) {
         "3D Spatial" -> call.isSpatial || call.callType.contains("3D", ignoreCase = true)
         "Outgoing" -> call.direction.equals("Outgoing", ignoreCase = true)
@@ -131,17 +138,19 @@ fun HistoryScreen(
   val totalSessions = remember(roomCallHistory) { roomCallHistory.size }
 
   val historyAvgPing = remember(roomCallHistory) {
-    if (roomCallHistory.isNotEmpty()) {
-      (roomCallHistory.sumOf { it.latencyMs.toLong() } / roomCallHistory.size).toInt()
+    val measured = roomCallHistory.filter { it.latencyMs > 0 }
+    if (measured.isNotEmpty()) {
+      (measured.sumOf { it.latencyMs.toLong() } / measured.size).toInt()
     } else {
-      22
+      UNKNOWN_PING_MS
     }
   }
 
   var livePingMs by remember { androidx.compose.runtime.mutableIntStateOf(historyAvgPing) }
   LaunchedEffect(roomCallHistory) {
-    if (roomCallHistory.isNotEmpty()) {
-      livePingMs = (roomCallHistory.sumOf { it.latencyMs.toLong() } / roomCallHistory.size).toInt()
+    val measured = roomCallHistory.filter { it.latencyMs > 0 }
+    if (measured.isNotEmpty()) {
+      livePingMs = (measured.sumOf { it.latencyMs.toLong() } / measured.size).toInt()
     }
   }
 
@@ -155,10 +164,10 @@ fun HistoryScreen(
             val addr = java.net.InetAddress.getByName("8.8.8.8")
             addr.isReachable(300)
           }
-          val rtt = (System.currentTimeMillis() - start).toInt().coerceIn(14, 48)
-          livePingMs = rtt
+          val rtt = (System.currentTimeMillis() - start).toInt()
+          livePingMs = if (rtt > 0) rtt else UNKNOWN_PING_MS
         } catch (e: Exception) {
-          livePingMs = (18..26).random()
+          livePingMs = UNKNOWN_PING_MS
         }
       }
       kotlinx.coroutines.delay(4000)
@@ -239,8 +248,8 @@ fun HistoryScreen(
       HistoryMetricCard(
         icon = Icons.Default.NetworkCheck,
         title = "Avg Ping",
-        value = "$livePingMs ms",
-        tint = if (livePingMs < 60) LiveSuccess else Color(0xFFF59E0B),
+        value = if (livePingMs > 0) "$livePingMs ms" else "—",
+        tint = if (livePingMs in 1..59) LiveSuccess else Color(0xFFF59E0B),
         modifier = Modifier.weight(1f)
       )
     }
@@ -335,7 +344,11 @@ fun HistoryScreen(
           HistoryPeriodHeader("TODAY")
         }
         items(todayHistory, key = { it.id }) { call ->
-          HistoryEntityRow(call = call, onCallBack = { onStartCall(call.contactName) })
+          HistoryEntityRow(
+            call = call,
+            onCallBack = { onStartCall(call.contactName) },
+            onDelete = { scope.launch { repository.deleteCall(call.id) } }
+          )
           Spacer(modifier = Modifier.height(8.dp))
         }
       }
@@ -345,7 +358,11 @@ fun HistoryScreen(
           HistoryPeriodHeader("YESTERDAY")
         }
         items(yesterdayHistory, key = { it.id }) { call ->
-          HistoryEntityRow(call = call, onCallBack = { onStartCall(call.contactName) })
+          HistoryEntityRow(
+            call = call,
+            onCallBack = { onStartCall(call.contactName) },
+            onDelete = { scope.launch { repository.deleteCall(call.id) } }
+          )
           Spacer(modifier = Modifier.height(8.dp))
         }
       }
@@ -355,7 +372,11 @@ fun HistoryScreen(
           HistoryPeriodHeader("EARLIER THIS WEEK")
         }
         items(earlierHistory, key = { it.id }) { call ->
-          HistoryEntityRow(call = call, onCallBack = { onStartCall(call.contactName) })
+          HistoryEntityRow(
+            call = call,
+            onCallBack = { onStartCall(call.contactName) },
+            onDelete = { scope.launch { repository.deleteCall(call.id) } }
+          )
           Spacer(modifier = Modifier.height(8.dp))
         }
       }
@@ -480,7 +501,8 @@ private fun HistoryPeriodHeader(title: String) {
 @Composable
 private fun HistoryEntityRow(
   call: CallHistoryEntity,
-  onCallBack: () -> Unit
+  onCallBack: () -> Unit,
+  onDelete: () -> Unit
 ) {
   val isMissed = call.direction.equals("Missed", ignoreCase = true) || call.callType.equals("Missed", ignoreCase = true)
   val is3D = call.isSpatial || call.callType.contains("3D", ignoreCase = true)
@@ -502,8 +524,8 @@ private fun HistoryEntityRow(
       modifier = Modifier.weight(1f)
     ) {
       LiveVolumeAvatar(
-        avatarUrl = call.avatarUrl,
-        initials = if (call.initials.isNotEmpty()) call.initials else call.contactName.take(2).uppercase(),
+        avatarUrl = null,
+        initials = if (call.initials.isNotEmpty()) call.initials else call.contactName.take(2).uppercase().ifBlank { "3D" },
         size = 46.dp,
         showOnlineBadge = call.isOnline
       )
@@ -588,6 +610,23 @@ private fun HistoryEntityRow(
           contentDescription = "Call Back",
           tint = LivePrimaryContainer,
           modifier = Modifier.size(18.dp)
+        )
+      }
+
+      Spacer(modifier = Modifier.width(6.dp))
+
+      IconButton(
+        onClick = onDelete,
+        modifier = Modifier
+          .size(36.dp)
+          .clip(CircleShape)
+          .background(Color(0xFFF7F8FE))
+      ) {
+        Icon(
+          imageVector = Icons.Default.Clear,
+          contentDescription = "Delete call",
+          tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+          modifier = Modifier.size(16.dp)
         )
       }
     }

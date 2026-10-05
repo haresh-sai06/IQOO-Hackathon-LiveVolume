@@ -21,6 +21,8 @@ enum class CallPeriod {
 
 data class Contact(
   val id: String,
+  /** Firebase Auth UID (or shared directory UID) when this contact is registered in LiveVolume. */
+  val registeredUserId: String? = null,
   val name: String,
   val initials: String,
   val phone: String,

@@ -35,6 +35,8 @@ class CallHistoryRepository(
       if (FirebaseApp.getApps(ctx).isNotEmpty()) {
         val db = FirebaseFirestore.getInstance()
         val data = hashMapOf(
+          // Owner scoping so Firestore rules can keep each user's history private.
+          "ownerId" to (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""),
           "contactName" to call.contactName,
           "phoneNumber" to call.phoneNumber,
           "avatarUrl" to call.avatarUrl,
@@ -66,7 +68,12 @@ class CallHistoryRepository(
   suspend fun getCallCount(): Int = dao.getCount()
 
   suspend fun seedInitialDataIfEmpty() {
-    // Real call data only: calls are recorded live as they occur
+    try {
+      dao.deleteLegacyMockCalls()
+      dao.deleteUnknownCalls()
+    } catch (e: Exception) {
+      Log.w("CallHistoryRepo", "Cleanup legacy mock calls: ${e.message}")
+    }
   }
 
   companion object {

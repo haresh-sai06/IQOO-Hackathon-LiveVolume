@@ -6,21 +6,45 @@ import com.example.model.CallSession
 import com.example.model.CallSessionState
 import com.example.util.InAppNotificationManager
 import com.example.util.InAppNotificationType
-import com.google.firebase.FirebaseApp
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Real-time call signaling repository managing call invites, channel coordination,
- * and live ringing/handshake state synchronization via Cloud Firestore.
+ * Real-time call signaling repository: owns the ringing handshake and the
+ * channel coordination that accompanies it.
+ *
+ * State machine:
+ * ```
+ *   caller: startCall -> RINGING --(peer CONNECTED)--> CONNECTED
+ *                              \--(peer REJECTED)---> REJECTED
+ *                              \--(no answer in TTL) -> ENDED
+ *   callee: invite observed -> ring -> acceptCall -> CONNECTED
+ *                                  \-> declineCall -> REJECTED
+ * ```
+ *
+ * The backend is reached through a [CallSignalingTransport], and the dispatcher
+ * plus clock are injectable, so every transition above is covered by
+ * deterministic unit tests without a live Firestore project.
  */
-class CallSignalingRepository private constructor(private val context: Context) {
+class CallSignalingRepository internal constructor(
+  private val context: Context,
+  private val transport: CallSignalingTransport,
+  private val ioDispatcher: CoroutineDispatcher,
+  private val clock: () -> Long,
+  /**
+   * Surfaces the incoming-call alert. Injected rather than called statically so
+   * that duplicate ringing for a repeatedly-delivered invite is directly
+   * observable in tests; production wiring posts the in-app banner.
+   */
+  private val alertIncomingCall: (CallSession) -> Unit
+) {
 
   private val _activeSession = MutableStateFlow<CallSession?>(null)
   val activeSession: StateFlow<CallSession?> = _activeSession.asStateFlow()
@@ -28,142 +52,181 @@ class CallSignalingRepository private constructor(private val context: Context) 
   private val _incomingCall = MutableStateFlow<CallSession?>(null)
   val incomingCall: StateFlow<CallSession?> = _incomingCall.asStateFlow()
 
-  private val scope = CoroutineScope(Dispatchers.IO)
-  private var firestore: FirebaseFirestore? = null
-  private var activeSessionListener: ListenerRegistration? = null
-  private var incomingCallsListener: ListenerRegistration? = null
+  /**
+   * One-shot event raised the moment a call is answered — whether from the
+   * in-app dialog or from a notification action. The UI collects this and
+   * routes into the call screen, so answering a push notification no longer
+   * silently drops the user back on the home screen.
+   */
+  private val _acceptedCall = MutableStateFlow<CallSession?>(null)
+  val acceptedCall: StateFlow<CallSession?> = _acceptedCall.asStateFlow()
 
-  init {
-    try {
-      if (FirebaseApp.getApps(context).isNotEmpty()) {
-        firestore = FirebaseFirestore.getInstance()
+  /** Clears [acceptedCall] once the UI has consumed it. */
+  fun consumeAcceptedCall() {
+    _acceptedCall.value = null
+  }
+
+  private val scope = CoroutineScope(ioDispatcher + SupervisorJob())
+  private var activeSubscription: Subscription? = null
+  private var incomingSubscription: Subscription? = null
+
+  private val suppressionLock = Any()
+
+  /**
+   * Call ids this device has already dismissed or declined.
+   *
+   * A dismissed invite is still RINGING on the backend (only the dialog was
+   * hidden), so every later delivery of that document — for example after the
+   * caller's periodic heartbeat write — would otherwise pop the call back up.
+   */
+  private val suppressedCallIds = LinkedHashSet<String>()
+
+  /**
+   * Starts listening in real-time for incoming call invites directed to this user.
+   *
+   * Production: scoped query on `receiverId` so one device never downloads the
+   * whole global `calls` table. Falls back to legacy name-match only when the
+   * account has no UID yet.
+   */
+  fun startListeningForIncomingCalls(myUserName: String, myUserId: String = "") {
+    incomingSubscription?.cancel()
+    clearSuppressions()
+    val cleanName = myUserName.trim().lowercase()
+
+    incomingSubscription = transport.observeIncomingInvites(myUserId, myUserName) { invites ->
+      for (invite in invites) {
+        val addressedToMe = if (myUserId.isNotBlank()) {
+          invite.receiverId == myUserId
+        } else {
+          invite.receiverName.trim().lowercase() == cleanName
+        }
+        if (!addressedToMe) continue
+
+        // Stale invites (older than the TTL) must stop ringing, so mark them
+        // ENDED on the backend rather than presenting them as a live call.
+        val cutoff = clock() - INVITE_TTL_MS
+        if (invite.startedAt <= cutoff) {
+          scope.launch {
+            runCatching { transport.updateInviteState(invite.callId, CallSessionState.ENDED) }
+          }
+          continue
+        }
+
+        // Never ring for the call this device is already driving, nor for one
+        // the user has already dealt with.
+        if (_activeSession.value?.callId == invite.callId) continue
+        if (isSuppressed(invite.callId)) continue
+        if (_incomingCall.value?.callId == invite.callId) continue
+
+        val session = CallSession(
+          callId = invite.callId,
+          callerId = invite.callerId,
+          callerName = invite.callerName.ifBlank { "LiveVolume Peer" },
+          receiverId = invite.receiverId,
+          receiverName = myUserName,
+          channelName = invite.channelName,
+          state = CallSessionState.RINGING,
+          startedAt = invite.startedAt
+        )
+
+        Log.i(
+          TAG,
+          "Incoming call invite for $myUserName from ${session.callerName} on ${session.channelName}"
+        )
+        _incomingCall.value = session
+
+        alertIncomingCall(session)
       }
-    } catch (e: Exception) {
-      Log.w(TAG, "Firestore signaling unavailable: ${e.message}")
     }
   }
 
   /**
-   * Starts listening in real-time for incoming call invites directed to this user.
+   * Initiates a new call invite in the backend and starts tracking peer state.
+   *
+   * @param callerId Firebase UID of the caller (routing identity — never a display name).
    */
-  fun startListeningForIncomingCalls(myUserName: String) {
-    val db = firestore ?: return
-    incomingCallsListener?.remove()
+  fun startCall(
+    callerName: String,
+    receiverName: String,
+    receiverId: String,
+    callerId: String = "",
+    ttlMs: Long = INVITE_TTL_MS
+  ): CallSession {
+    require(receiverName.isNotBlank()) { "A saved contact is required to start a call." }
+    require(receiverId.isNotBlank()) { "A registered contact identity is required to start a call." }
 
-    val cutoff = System.currentTimeMillis() - 45000L // last 45 seconds
-    val cleanName = myUserName.trim().lowercase()
-
-    incomingCallsListener = db.collection("calls")
-      .whereEqualTo("state", CallSessionState.RINGING.name)
-      .addSnapshotListener { snapshot, error ->
-        if (error != null) {
-          Log.w(TAG, "Error listening for incoming calls: ${error.message}")
-          return@addSnapshotListener
-        }
-
-        snapshot?.documents?.forEach { doc ->
-          val receiver = doc.getString("receiverName")?.trim()?.lowercase() ?: ""
-          val startedAt = doc.getLong("startedAt") ?: 0L
-
-          if (receiver.contains(cleanName) || cleanName.contains(receiver) || receiver == "me" || cleanName == "me") {
-            if (startedAt > cutoff && _activeSession.value?.callId != doc.id) {
-              val callId = doc.getString("callId") ?: doc.id
-              val callerName = doc.getString("callerName") ?: "Live Contact"
-              val channelName = doc.getString("channelName") ?: ("livevolume_" + callerName.lowercase().replace(Regex("[^a-z0-9]"), ""))
-
-              val session = CallSession(
-                callId = callId,
-                callerName = callerName,
-                receiverName = myUserName,
-                channelName = channelName,
-                state = CallSessionState.RINGING,
-                startedAt = startedAt
-              )
-
-              if (_incomingCall.value?.callId != callId) {
-                Log.i(TAG, "Incoming call invite detected for $myUserName from $callerName on channel $channelName")
-                _incomingCall.value = session
-
-                InAppNotificationManager.postNotification(
-                  title = "Incoming Video Call",
-                  message = "$callerName is calling you...",
-                  type = InAppNotificationType.CALL_INCOMING,
-                  context = context
-                )
-              }
-            }
-          }
-        }
-      }
-  }
-
-  /**
-   * Initiates a new real-time call invite in Firestore and starts tracking peer state.
-   */
-  fun startCall(callerName: String, receiverName: String): CallSession {
-    val callId = "call_${System.currentTimeMillis()}"
-    val sanitizedReceiver = receiverName.lowercase().replace(Regex("[^a-z0-9]"), "").ifBlank { "user" }
+    val now = clock()
+    val callId = "call_$now"
+    val sanitizedReceiver = receiverId.lowercase().replace(Regex("[^a-z0-9]"), "").ifBlank { "user" }
     val channelName = "livevolume_$sanitizedReceiver"
 
     val session = CallSession(
       callId = callId,
-      callerId = "my_uid",
+      callerId = callerId.ifBlank { "uid_$now" },
       callerName = callerName,
-      receiverId = "receiver_${receiverName.hashCode()}",
+      receiverId = receiverId,
       receiverName = receiverName,
       channelName = channelName,
       state = CallSessionState.RINGING,
       is3D = false,
-      startedAt = System.currentTimeMillis()
+      startedAt = now
     )
 
     _activeSession.value = session
 
-    // Push call invite document to Firestore
-    firestore?.let { db ->
-      scope.launch {
-        try {
-          val data = hashMapOf(
-            "callId" to session.callId,
-            "callerName" to session.callerName,
-            "receiverName" to session.receiverName,
-            "channelName" to session.channelName,
-            "state" to session.state.name,
-            "startedAt" to session.startedAt
-          )
-          db.collection("calls").document(callId).set(data)
-          listenToCallDocument(callId)
-        } catch (e: Exception) {
-          Log.w(TAG, "Failed to write call invite to Firestore: ${e.message}")
+    // Without a reachable backend the call still works locally (Agora handles
+    // media); there is simply nobody to ring and nothing to expire server-side.
+    if (!transport.isAvailable) return session
+
+    scope.launch {
+      try {
+        transport.createInvite(session.toInvite(ttlMs))
+        listenToCallDocument(callId)
+
+        // Auto-cancel if the callee never answers within the TTL.
+        launch {
+          delay(ttlMs)
+          val current = _activeSession.value
+          if (current != null && current.callId == callId && current.state == CallSessionState.RINGING) {
+            runCatching { transport.updateInviteState(callId, CallSessionState.ENDED) }
+            _activeSession.value = current.copy(state = CallSessionState.ENDED)
+          }
         }
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to write call invite: ${e.message}")
       }
     }
 
     return session
   }
 
+  /** Periodic heartbeat so the peer can detect caller death (no presence infra yet). */
+  fun heartbeat() {
+    val current = _activeSession.value ?: return
+    if (!transport.isAvailable) return
+    scope.launch {
+      runCatching { transport.updateInviteHeartbeat(current.callId, clock()) }
+    }
+  }
+
+  /** Uploads this device's FCM token for server-side push fan-out. */
+  fun syncFcmToken(uid: String, token: String) {
+    if (uid.isBlank() || token.isBlank() || !transport.isAvailable) return
+    scope.launch {
+      runCatching { transport.saveDeviceToken(uid, token, clock()) }
+    }
+  }
+
   private fun listenToCallDocument(callId: String) {
-    val db = firestore ?: return
-    activeSessionListener?.remove()
-
-    activeSessionListener = db.collection("calls").document(callId)
-      .addSnapshotListener { snapshot, error ->
-        if (error != null) {
-          Log.w(TAG, "Error listening to call session: ${error.message}")
-          return@addSnapshotListener
-        }
-
-        if (snapshot != null && snapshot.exists()) {
-          val stateStr = snapshot.getString("state") ?: CallSessionState.RINGING.name
-          val state = try { CallSessionState.valueOf(stateStr) } catch (e: Exception) { CallSessionState.RINGING }
-          val channelName = snapshot.getString("channelName") ?: _activeSession.value?.channelName ?: ""
-
-          _activeSession.value = _activeSession.value?.copy(
-            state = state,
-            channelName = channelName
-          )
-        }
-      }
+    activeSubscription?.cancel()
+    activeSubscription = transport.observeInvite(callId) { invite ->
+      if (invite == null) return@observeInvite
+      val current = _activeSession.value ?: return@observeInvite
+      _activeSession.value = current.copy(
+        state = invite.state,
+        channelName = invite.channelName.ifBlank { current.channelName }
+      )
+    }
   }
 
   /**
@@ -172,15 +235,22 @@ class CallSignalingRepository private constructor(private val context: Context) 
   fun acceptCall(session: CallSession) {
     _incomingCall.value = null
     _activeSession.value = session.copy(state = CallSessionState.CONNECTED)
+    _acceptedCall.value = session
 
-    firestore?.let { db ->
-      scope.launch {
-        try {
-          db.collection("calls").document(session.callId).update("state", CallSessionState.CONNECTED.name)
-          listenToCallDocument(session.callId)
-        } catch (e: Exception) {
-          Log.w(TAG, "Failed accepting call in Firestore: ${e.message}")
-        }
+    // Stop the ringing notification when the user answers from anywhere else.
+    try {
+      com.example.service.LiveVolumeMessagingService
+        .cancelIncomingCallNotification(context, session.callId)
+    } catch (_: Exception) {}
+
+    if (!transport.isAvailable) return
+
+    scope.launch {
+      try {
+        transport.updateInviteState(session.callId, CallSessionState.CONNECTED)
+        listenToCallDocument(session.callId)
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed accepting call: ${e.message}")
       }
     }
   }
@@ -189,71 +259,131 @@ class CallSignalingRepository private constructor(private val context: Context) 
    * Called by the callee to decline an incoming call.
    */
   fun declineCall(session: CallSession) {
+    suppress(session.callId)
     _incomingCall.value = null
-
-    firestore?.let { db ->
-      scope.launch {
-        try {
-          db.collection("calls").document(session.callId).update("state", CallSessionState.REJECTED.name)
-        } catch (e: Exception) {
-          Log.w(TAG, "Failed declining call in Firestore: ${e.message}")
-        }
-      }
+    if (!transport.isAvailable) return
+    scope.launch {
+      runCatching { transport.updateInviteState(session.callId, CallSessionState.REJECTED) }
     }
   }
 
   /**
-   * Called when an FCM push message with call invite payload is received.
+   * Called when an FCM push message with a call invite payload is received.
    */
   fun onIncomingCallInviteReceived(callId: String, callerName: String, channelName: String) {
-    val session = CallSession(
+    _incomingCall.value = CallSession(
       callId = callId,
       callerName = callerName,
       channelName = channelName,
       state = CallSessionState.RINGING,
-      startedAt = System.currentTimeMillis()
+      startedAt = clock()
     )
-    _incomingCall.value = session
   }
 
   fun updateCallState(newState: CallSessionState) {
     val current = _activeSession.value ?: return
     _activeSession.value = current.copy(state = newState)
 
-    firestore?.let { db ->
-      scope.launch {
-        try {
-          db.collection("calls").document(current.callId).update("state", newState.name)
-        } catch (e: Exception) {
-          Log.w(TAG, "Failed updating call state in Firestore: ${e.message}")
-        }
-      }
+    if (!transport.isAvailable) return
+    scope.launch {
+      runCatching { transport.updateInviteState(current.callId, newState) }
     }
   }
 
-  fun endCall() {
+  fun endCall(deleteInvite: Boolean = true) {
     val current = _activeSession.value
     if (current != null) {
       updateCallState(CallSessionState.ENDED)
+      // TTL cleanup: remove the invite doc so the callee's listener stops ringing.
+      if (deleteInvite && transport.isAvailable) {
+        scope.launch {
+          // Small delay lets the peer observe ENDED before the doc vanishes.
+          delay(TEARDOWN_GRACE_MS)
+          runCatching { transport.deleteInvite(current.callId) }
+        }
+      }
     }
-    activeSessionListener?.remove()
-    activeSessionListener = null
+    activeSubscription?.cancel()
+    activeSubscription = null
     _activeSession.value = null
   }
 
   fun dismissIncomingCall() {
+    suppress(_incomingCall.value?.callId.orEmpty())
     _incomingCall.value = null
   }
 
+  private fun suppress(callId: String) {
+    if (callId.isBlank()) return
+    synchronized(suppressionLock) {
+      suppressedCallIds.add(callId)
+      // Bound the set: invites expire long before this many calls accumulate.
+      while (suppressedCallIds.size > MAX_SUPPRESSED_CALLS) {
+        val oldest = suppressedCallIds.firstOrNull() ?: break
+        suppressedCallIds.remove(oldest)
+      }
+    }
+  }
+
+  private fun isSuppressed(callId: String): Boolean =
+    synchronized(suppressionLock) { callId in suppressedCallIds }
+
+  private fun clearSuppressions() {
+    synchronized(suppressionLock) { suppressedCallIds.clear() }
+  }
+
+  /** Releases realtime listeners; intended for sign-out and tests. */
+  fun dispose() {
+    activeSubscription?.cancel()
+    activeSubscription = null
+    incomingSubscription?.cancel()
+    incomingSubscription = null
+  }
+
+  private fun CallSession.toInvite(ttlMs: Long): CallInvite = CallInvite(
+    callId = callId,
+    callerId = callerId,
+    callerName = callerName,
+    receiverId = receiverId,
+    receiverName = receiverName,
+    channelName = channelName,
+    state = state,
+    startedAt = startedAt,
+    expiresAt = startedAt + ttlMs,
+    heartbeatAt = startedAt
+  )
+
   companion object {
     private const val TAG = "CallSignalingRepo"
+
+    /** How long an unanswered invite keeps ringing before it self-cancels. */
+    const val INVITE_TTL_MS = 60_000L
+
+    /** Grace period so the peer can observe ENDED before the invite is deleted. */
+    const val TEARDOWN_GRACE_MS = 5_000L
+
+    private const val MAX_SUPPRESSED_CALLS = 32
 
     @Volatile
     private var INSTANCE: CallSignalingRepository? = null
 
     fun getInstance(context: Context): CallSignalingRepository {
       return INSTANCE ?: synchronized(this) {
-        INSTANCE ?: CallSignalingRepository(context.applicationContext).also { INSTANCE = it }
+        val appContext = context.applicationContext
+        INSTANCE ?: CallSignalingRepository(
+          context = appContext,
+          transport = FirestoreCallSignalingTransport(appContext),
+          ioDispatcher = Dispatchers.IO,
+          clock = System::currentTimeMillis,
+          alertIncomingCall = { session ->
+            InAppNotificationManager.postNotification(
+              title = "Incoming Video Call",
+              message = "${session.callerName} is calling you...",
+              type = InAppNotificationType.CALL_INCOMING,
+              context = appContext
+            )
+          }
+        ).also { INSTANCE = it }
       }
     }
   }

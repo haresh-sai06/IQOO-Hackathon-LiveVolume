@@ -2,7 +2,7 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.example.model.DataRepository
+import com.example.model.AppContent
 import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -23,20 +23,43 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `verify contacts and repository data`() {
-    assertTrue(DataRepository.allContacts.isNotEmpty())
-    assertTrue(DataRepository.callRecords.isNotEmpty())
-    assertEquals("Sarah Chen", DataRepository.myProfile.name)
+  fun `verify static content is available and holds no mock identities`() {
+    assertTrue(AppContent.faqs.isNotEmpty())
+    assertTrue(AppContent.guides.isNotEmpty())
+    assertTrue(AppContent.privacySections.isNotEmpty())
+    assertTrue(AppContent.LOGO_URL.startsWith("https://"))
+  }
+
+  @Test
+  fun `verify worst network signal determines quality tier`() {
+    // Agora hint says POOR while raw stats look EXCELLENT -> still POOR.
+    assertEquals(
+      com.example.call.NetworkQualityTier.POOR,
+      com.example.call.NetworkQualityTier.fromStats(rttMs = 20, lossPct = 0, agoraQuality = 5)
+    )
+    // Agora hint says EXCELLENT while the stats say POOR -> still POOR.
+    assertEquals(
+      com.example.call.NetworkQualityTier.POOR,
+      com.example.call.NetworkQualityTier.fromStats(rttMs = 400, lossPct = 0, agoraQuality = 1)
+    )
+    // No statistics received yet must never read as a healthy link.
+    assertEquals(
+      com.example.call.NetworkQualityTier.OFFLINE,
+      com.example.call.NetworkQualityTier.fromStats(rttMs = -1, lossPct = 0, agoraQuality = null)
+    )
   }
 
   @Test
   fun `verify CallViewModel state management`() {
-    val viewModel = com.example.viewmodel.CallViewModel()
+    val viewModel = com.example.viewmodel.CallViewModel(ApplicationProvider.getApplicationContext())
+    // Production: fresh VM is IDLE/DISCONNECTED until initializeCall() joins RTC.
+    // Allow async lifecycle collector to settle, then assert idle semantics.
+    kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(100L) }
     val initialState = viewModel.uiState.value
 
     assertEquals(false, initialState.isMuted)
     assertEquals(true, initialState.isCameraOn)
-    assertEquals(com.example.viewmodel.ConnectionStatus.CONNECTED, initialState.connectionStatus)
+    assertEquals(com.example.viewmodel.ConnectionStatus.DISCONNECTED, initialState.connectionStatus)
 
     viewModel.toggleMute()
     assertEquals(true, viewModel.uiState.value.isMuted)
@@ -89,7 +112,10 @@ class ExampleRobolectricTest {
 
   @Test
   fun `verify connection strength latency and color transitions`() {
-    val viewModel = com.example.viewmodel.CallViewModel()
+    val viewModel = com.example.viewmodel.CallViewModel(ApplicationProvider.getApplicationContext())
+    // Production: quality is derived from REAL rtc stats; force CONNECTED first
+    // so latency mapping is exercised without the DISCONNECTED->POOR override.
+    viewModel.setConnectionStatus(com.example.viewmodel.ConnectionStatus.CONNECTED)
 
     // Low latency -> Green (Excellent)
     viewModel.updateLatency(20)
@@ -128,7 +154,7 @@ class ExampleRobolectricTest {
 
   @Test
   fun `verify CallViewModel coroutine timer and duration formatted`() {
-    val viewModel = com.example.viewmodel.CallViewModel()
+    val viewModel = com.example.viewmodel.CallViewModel(ApplicationProvider.getApplicationContext())
     viewModel.initializeCall("Sarah Chen")
     assertEquals("00:00", viewModel.elapsedDurationFormatted.value)
     assertEquals(0L, viewModel.elapsedSeconds.value)

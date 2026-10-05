@@ -36,8 +36,14 @@ class MainActivity : ComponentActivity() {
     when (intent.action) {
       LiveVolumeMessagingService.ACTION_ANSWER_CALL -> {
         val callId = intent.getStringExtra(LiveVolumeMessagingService.EXTRA_CALL_ID) ?: ""
-        val callerName = intent.getStringExtra(LiveVolumeMessagingService.EXTRA_CALLER_NAME) ?: "Live Contact"
+        val callerName = intent.getStringExtra(LiveVolumeMessagingService.EXTRA_CALLER_NAME) ?: "LiveVolume Peer"
         val channelName = intent.getStringExtra(LiveVolumeMessagingService.EXTRA_CHANNEL_NAME) ?: ""
+        if (callId.isNotBlank()) {
+          try {
+            (getSystemService(NOTIFICATION_SERVICE) as? android.app.NotificationManager)
+              ?.cancel(callId.hashCode())
+          } catch (_: Exception) {}
+        }
         signalingRepo.acceptCall(
           CallSession(
             callId = callId,
@@ -48,6 +54,12 @@ class MainActivity : ComponentActivity() {
       }
       LiveVolumeMessagingService.ACTION_DECLINE_CALL -> {
         val callId = intent.getStringExtra(LiveVolumeMessagingService.EXTRA_CALL_ID) ?: ""
+        if (callId.isNotBlank()) {
+          try {
+            (getSystemService(NOTIFICATION_SERVICE) as? android.app.NotificationManager)
+              ?.cancel(callId.hashCode())
+          } catch (_: Exception) {}
+        }
         signalingRepo.declineCall(
           CallSession(callId = callId)
         )

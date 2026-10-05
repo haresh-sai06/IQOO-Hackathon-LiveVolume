@@ -59,7 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.model.DataRepository
+import com.example.model.AppContent
 import com.example.ui.theme.LivePrimaryContainer
 import com.example.ui.theme.LiveSuccess
 
@@ -139,7 +139,7 @@ fun HelpSupportScreen(
         Spacer(modifier = Modifier.width(12.dp))
 
         AsyncImage(
-          model = DataRepository.SUPPORT_HERO_URL,
+          model = AppContent.SUPPORT_HERO_URL,
           contentDescription = "Support Specialist",
           contentScale = ContentScale.Crop,
           modifier = Modifier
@@ -241,7 +241,7 @@ fun HelpSupportScreen(
     ) {
       Row(verticalAlignment = Alignment.CenterVertically) {
         AsyncImage(
-          model = DataRepository.LIGHTING_GUIDE_URL,
+          model = AppContent.LIGHTING_GUIDE_URL,
           contentDescription = "Lighting Guide",
           contentScale = ContentScale.Crop,
           modifier = Modifier
@@ -300,7 +300,7 @@ fun HelpSupportScreen(
       modifier = Modifier.fillMaxWidth(),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      DataRepository.faqs.forEach { faq ->
+      AppContent.faqs.forEach { faq ->
         val isExpanded = expandedFaqs[faq.id] == true
         Box(
           modifier = Modifier

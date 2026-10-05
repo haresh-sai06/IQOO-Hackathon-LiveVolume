@@ -39,7 +39,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,7 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.repository.AuthRepository
-import com.example.model.DataRepository
+import com.example.model.AppContent
 import kotlinx.coroutines.launch
 
 @Composable
@@ -190,7 +189,7 @@ fun AuthScreen(
           contentAlignment = Alignment.Center
         ) {
           AsyncImage(
-            model = DataRepository.LOGO_URL,
+            model = AppContent.LOGO_URL,
             contentDescription = "LiveVolume",
             modifier = Modifier.fillMaxSize()
           )
@@ -515,113 +514,6 @@ fun AuthScreen(
                 fontWeight = FontWeight.SemiBold
               )
             )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(22.dp))
-
-        // Subtle Divider
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-          )
-          Text(
-            text = "or continue with",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(horizontal = 12.dp)
-          )
-          HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-          )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Refined Social Buttons (Google & Apple)
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-          Box(
-            modifier = Modifier
-              .weight(1f)
-              .height(46.dp)
-              .clip(RoundedCornerShape(12.dp))
-              .background(MaterialTheme.colorScheme.surface)
-              .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(12.dp)
-              )
-              .clickable {
-                scope.launch {
-                  isLoading = true
-                  errorMessage = null
-                  authRepository.signIn("google.user@example.com", "Password123!")
-                  isLoading = false
-                  onAuthSuccess()
-                }
-              },
-            contentAlignment = Alignment.Center
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(
-                text = "G",
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF4285F4),
-                fontSize = 17.sp
-              )
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(
-                text = "Google",
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurface
-              )
-            }
-          }
-
-          Box(
-            modifier = Modifier
-              .weight(1f)
-              .height(46.dp)
-              .clip(RoundedCornerShape(12.dp))
-              .background(MaterialTheme.colorScheme.surface)
-              .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(12.dp)
-              )
-              .clickable {
-                scope.launch {
-                  isLoading = true
-                  errorMessage = null
-                  authRepository.signIn("apple.user@example.com", "Password123!")
-                  isLoading = false
-                  onAuthSuccess()
-                }
-              },
-            contentAlignment = Alignment.Center
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(
-                text = "",
-                fontWeight = FontWeight.Bold,
-                fontSize = 17.sp,
-                color = MaterialTheme.colorScheme.onSurface
-              )
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(
-                text = "Apple",
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurface
-              )
-            }
           }
         }
 

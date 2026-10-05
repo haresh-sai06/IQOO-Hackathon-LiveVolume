@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only network policy.
+
+  The Firebase emulator suite (and the reference Agora token server) run on the
+  developer machine and speak plaintext HTTP/gRPC over the adb-reverse tunnel.
+  Release builds keep the platform default, which forbids cleartext everywhere.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false" />
+
+  <domain-config cleartextTrafficPermitted="true">
+    <!-- adb reverse tcp:8080 tcp:8080 tunnels host loopback into the device. -->
+    <domain includeSubdomains="false">127.0.0.1</domain>
+    <domain includeSubdomains="false">localhost</domain>
+    <!-- The Android emulator's alias for the host machine. -->
+    <domain includeSubdomains="false">10.0.2.2</domain>
+  </domain-config>
+</network-security-config>
