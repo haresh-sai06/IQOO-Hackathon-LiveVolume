@@ -332,7 +332,7 @@ fun DepthDebugPreviewScreen(
                 .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
               Text(
-                text = "Drag to orbit 3D • Pinch to zoom",
+                text = "Live 3D · drag to orbit · pinch to zoom",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium

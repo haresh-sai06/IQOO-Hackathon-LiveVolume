@@ -328,7 +328,7 @@ class AgoraManager private constructor(private var context: Context?) {
 
   /** Adaptive controller hook: throttles volumetric sends on poor networks. */
   fun setVolumetricBudget(maxPoints: Int, paused: Boolean) {
-    adaptiveMaxPoints = maxPoints.coerceIn(0, 1500)
+    adaptiveMaxPoints = maxPoints.coerceIn(0, 1800)
     adaptivePaused = paused
   }
 
@@ -562,7 +562,7 @@ class AgoraManager private constructor(private var context: Context?) {
     }
     sendInFlight = true
     lastSendMs = now
-    val maxPts = adaptiveMaxPoints.coerceIn(250, 1500)
+    val maxPts = adaptiveMaxPoints.coerceIn(250, 1800)
     val chunks = try {
       PointCloudStreamer.serializeToChunks(pointCloud, streamFrameId++, maxPts)
     } catch (e: Exception) {

@@ -26,7 +26,7 @@ object PointCloudStreamer {
    * @param frameId Monotonically increasing frame sequence number.
    * @param maxPoints Target number of transmitted points (downsamples evenly if pointCloud has more).
    */
-  fun serializeToChunks(pointCloud: PointCloud, frameId: Int, maxPoints: Int = 1200): List<ByteArray> {
+  fun serializeToChunks(pointCloud: PointCloud, frameId: Int, maxPoints: Int = 1500): List<ByteArray> {
     val totalAvailable = pointCloud.pointCount
     if (totalAvailable == 0) return emptyList()
 
